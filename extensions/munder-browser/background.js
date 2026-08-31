@@ -6,6 +6,7 @@
 const EXTENSION_VERSION = '0.1.0';
 const DEFAULT_PORT = 9777;
 const RECONNECT_MS = 3000;
+const AUTH_GRACE_MS = 500;
 
 const INTERACTIVE_ROLES = new Set([
   'button', 'link', 'textbox', 'searchbox', 'combobox', 'checkbox', 'radio',
@@ -17,6 +18,10 @@ const INTERACTIVE_ROLES = new Set([
 let ws = null;
 /** @type {ReturnType<typeof setTimeout> | null} */
 let reconnectTimer = null;
+/** @type {ReturnType<typeof setTimeout> | null} */
+let authTimer = null;
+let helloSent = false;
+let authConfirmed = false;
 /** @type {{ port: number, token: string }} */
 let config = { port: DEFAULT_PORT, token: '' };
 /** @type {Map<number, Map<string, object>>} tabId -> ref -> entry */
@@ -48,11 +53,32 @@ function scheduleReconnect() {
   }, RECONNECT_MS);
 }
 
+function clearAuthTimer() {
+  if (authTimer) {
+    clearTimeout(authTimer);
+    authTimer = null;
+  }
+}
+
+function resetAuthState() {
+  clearAuthTimer();
+  helloSent = false;
+  authConfirmed = false;
+}
+
+function confirmAuth() {
+  if (authConfirmed) return;
+  authConfirmed = true;
+  clearAuthTimer();
+  setBridgeStatus('connected');
+}
+
 function disconnect() {
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
+  resetAuthState();
   if (ws) {
     try { ws.close(); } catch { /* ignore */ }
     ws = null;
@@ -80,13 +106,20 @@ function connect() {
     return;
   }
 
+  resetAuthState();
+
   ws.onopen = () => {
+    helloSent = true;
     ws.send(JSON.stringify({
       type: 'hello',
       token: config.token,
       extensionVersion: EXTENSION_VERSION
     }));
-    setBridgeStatus('connected');
+    setBridgeStatus('connecting');
+    authTimer = setTimeout(() => {
+      authTimer = null;
+      if (ws && ws.readyState === WebSocket.OPEN) confirmAuth();
+    }, AUTH_GRACE_MS);
   };
 
   ws.onmessage = (event) => {
@@ -94,8 +127,13 @@ function connect() {
   };
 
   ws.onclose = () => {
+    const failedAuth = helloSent && !authConfirmed;
     ws = null;
-    setBridgeStatus('disconnected');
+    resetAuthState();
+    setBridgeStatus(
+      'disconnected',
+      failedAuth ? 'Auth failed — check token' : ''
+    );
     scheduleReconnect();
   };
 
@@ -142,10 +180,11 @@ function handleMessage(raw) {
 
   dispatchMethod(msg.id, msg.method, msg.params || {})
     .then((result) => {
+      confirmAuth();
       sendResponse({ id: msg.id, ok: true, result });
     })
     .catch((err) => {
-      const code = err.code || 'BROWSER_BRIDGE_DISCONNECTED';
+      const code = err.code || 'BROWSER_BRIDGE_BAD_REQUEST';
       sendResponse({
         id: msg.id,
         ok: false,
@@ -160,6 +199,10 @@ function bridgeError(code, message) {
   return err;
 }
 
+function badRequest(message) {
+  return bridgeError('BROWSER_BRIDGE_BAD_REQUEST', message);
+}
+
 // ---------------------------------------------------------------------------
 // Tab & debugger helpers
 // ---------------------------------------------------------------------------
@@ -168,7 +211,7 @@ async function resolveTabId(tabId) {
   if (tabId != null) return tabId;
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   const tab = tabs[0];
-  if (!tab?.id) throw bridgeError('BROWSER_BRIDGE_DISCONNECTED', 'no active tab');
+  if (!tab?.id) throw badRequest('no active tab');
   return tab.id;
 }
 
@@ -243,7 +286,7 @@ async function browser_tabs(params) {
       };
     }
     case 'focus': {
-      if (tabId == null) throw new Error('tabId required for focus');
+      if (tabId == null) throw badRequest('tabId required for focus');
       const tab = await chrome.tabs.update(tabId, { active: true });
       return { tabId: tab.id, url: tab.url, title: tab.title };
     }
@@ -252,20 +295,20 @@ async function browser_tabs(params) {
       return { tabId: tab.id, url: tab.url };
     }
     case 'close': {
-      if (tabId == null) throw new Error('tabId required for close');
+      if (tabId == null) throw badRequest('tabId required for close');
       await chrome.tabs.remove(tabId);
       attachedTabs.delete(tabId);
       refMaps.delete(tabId);
       return { ok: true };
     }
     default:
-      throw new Error(`unknown browser_tabs action: ${action}`);
+      throw badRequest(`unknown browser_tabs action: ${action}`);
   }
 }
 
 async function browser_navigate(params) {
   const { url } = params;
-  if (!url) throw new Error('url required');
+  if (!url) throw badRequest('url required');
   const tabId = await resolveTabId(params.tabId);
   const tab = await chrome.tabs.update(tabId, { url });
   return { tabId: tab.id, url: tab.url ?? url };
@@ -275,14 +318,18 @@ async function browser_snapshot(params) {
   const tabId = await resolveTabId(params.tabId);
   await ensureTabReady(tabId);
 
+  await sendCommand(tabId, 'Accessibility.enable');
   let tree;
   try {
     tree = await sendCommand(tabId, 'Accessibility.getFullAXTree');
-  } catch {
-    tree = { nodes: [] };
+  } catch (err) {
+    throw badRequest(`Accessibility.getFullAXTree failed: ${err.message || err}`);
   }
 
   const nodes = tree.nodes || [];
+  if (nodes.length === 0) {
+    throw badRequest('accessibility tree empty after Accessibility.enable');
+  }
   const refs = [];
   const refMap = new Map();
   let counter = 1;
@@ -321,6 +368,10 @@ async function browser_snapshot(params) {
     refMap.set(ref, entry);
   }
 
+  if (refs.length === 0) {
+    throw badRequest('no interactable elements in accessibility tree');
+  }
+
   refMaps.set(tabId, refMap);
   return { refs };
 }
@@ -355,14 +406,14 @@ async function browser_click(params) {
   } else if (params.x != null && params.y != null) {
     await clickAt(tabId, params.x, params.y);
   } else {
-    throw new Error('ref or x/y required');
+    throw badRequest('ref or x/y required');
   }
   return { ok: true };
 }
 
 async function browser_type(params) {
   const { text } = params;
-  if (text == null) throw new Error('text required');
+  if (text == null) throw badRequest('text required');
   const tabId = await resolveTabId(params.tabId);
   await ensureTabReady(tabId);
 
@@ -407,7 +458,7 @@ function keyDef(key) {
 
 async function browser_press(params) {
   const { key } = params;
-  if (!key) throw new Error('key required');
+  if (!key) throw badRequest('key required');
   const tabId = await resolveTabId(params.tabId);
   await ensureTabReady(tabId);
 
@@ -436,7 +487,7 @@ async function browser_screenshot(params) {
 
 async function browser_evaluate(params) {
   const { expression } = params;
-  if (!expression) throw new Error('expression required');
+  if (!expression) throw badRequest('expression required');
   const tabId = await resolveTabId(params.tabId);
   await ensureTabReady(tabId);
 
@@ -447,7 +498,7 @@ async function browser_evaluate(params) {
   });
 
   if (result.exceptionDetails) {
-    throw new Error(result.exceptionDetails.text || 'evaluation failed');
+    throw badRequest(result.exceptionDetails.text || 'evaluation failed');
   }
   return { value: result.result?.value };
 }
@@ -465,7 +516,7 @@ const METHODS = {
 
 async function dispatchMethod(id, method, params) {
   const handler = METHODS[method];
-  if (!handler) throw new Error(`unknown method: ${method}`);
+  if (!handler) throw badRequest(`unknown method: ${method}`);
   return handler(params);
 }
 
