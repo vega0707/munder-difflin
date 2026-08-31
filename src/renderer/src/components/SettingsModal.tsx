@@ -19,9 +19,11 @@ import { SetupPanel } from './SetupPanel';
 import { Icon } from './Icon';
 import { OfficeThemePicker } from './OfficeThemePicker';
 import { McpDefaultsSettings } from './McpDefaultsSettings';
+import { BrowserDesktopSettings } from './BrowserDesktopSettings';
 import { IntegrationsRegistry } from './IntegrationsRegistry';
 import { AiEnginesSettings } from './AiEnginesSettings';
 import { REALTIME_MODEL } from '@shared/realtimePricing';
+import { resolveSttProvider, STT_PROVIDERS, isSttProviderId, type SttProviderId } from '@shared/sttProviders';
 import { RealtimeDevicePicker } from '@/realtime/DevicePicker';
 import { CostHud } from '@/realtime/CostHud';
 import {
@@ -223,7 +225,7 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
   // ─── v0.3.4 redesign: settings that were onboarding-trapped or UI-less ────
   const cfgX = config as HarnessConfig & {
     strongKeepalive?: boolean; audience?: string; autoMode?: boolean;
-    defaultModel?: string; maxTurns?: number; semanticMemory?: boolean;
+    defaultModel?: string; maxTurns?: number; maxActiveAgents?: number; semanticMemory?: boolean;
   };
   /**
    * ONE SAVE BUTTON.
@@ -305,6 +307,14 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
     const n = maxTurnsVal.trim() === '' ? undefined : Number(maxTurnsVal);
     return { maxTurns: Number.isFinite(n as number) && (n as number) > 0 ? Math.round(n as number) : undefined } as Partial<HarnessConfig>;
   };
+  const [maxActiveVal, setMaxActiveVal] = useState<string>(
+    String(cfgX.maxActiveAgents != null ? cfgX.maxActiveAgents : 5)
+  );
+  const maxActivePatch = (): Partial<HarnessConfig> => {
+    const n = Number(maxActiveVal);
+    const clamped = Number.isFinite(n) ? Math.min(32, Math.max(1, Math.floor(n))) : 5;
+    return { maxActiveAgents: clamped } as Partial<HarnessConfig>;
+  };
   const [semMemOn, setSemMemOn] = useState<boolean>(cfgX.semanticMemory !== false);
   const toggleSemMem = async () => {
     const next = !semMemOn;
@@ -352,6 +362,7 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
     try {
       const patch: Partial<HarnessConfig> = {
         ...maxTurnsPatch(),
+        ...maxActivePatch(),
         ...budgetPatch(),
         ...pending
       };
@@ -401,6 +412,15 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
   const [tunnelUrl, setTunnelUrl] = useState('');
   const [slackBusy, setSlackBusy] = useState(false);
   const [slackNote, setSlackNote] = useState('');
+  const [seatHubUrl, setSeatHubUrl] = useState(config.seatHubUrl ?? '');
+  const [seatHubToken, setSeatHubToken] = useState(config.seatHubToken ?? '');
+  const [seatHubListen, setSeatHubListen] = useState(config.seatHubListen === true);
+  const [seatHubPort, setSeatHubPort] = useState(String(config.seatHubPort ?? 3851));
+  const [seatHubBind, setSeatHubBind] = useState(config.seatHubBind ?? '127.0.0.1');
+  const [seatHubBusy, setSeatHubBusy] = useState(false);
+  const [seatHubNote, setSeatHubNote] = useState('');
+  const [seatHubListening, setSeatHubListening] = useState(false);
+  const [seatHubListenUrl, setSeatHubListenUrl] = useState('');
   // Whether the webhook server is currently live. Hydrated from main on open so
   // reopening Settings shows the true connection state + the persisted Request URL.
   const [running, setRunning] = useState(false);
@@ -499,6 +519,7 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
   // --- Free Flow (voice dictation → message queue) ---
   const setFreeflowEnabledStore = useStore((s) => s.setFreeflowEnabled);
   const setHasGroqKeyStore = useStore((s) => s.setHasGroqKey);
+  const setHasCtripAsrTokenStore = useStore((s) => s.setHasCtripAsrToken);
   // Talk (Realtime Michael) is gated on the OpenAI key — read the live presence
   // boolean so the Realtime Michael section can show its enabled/disabled status.
   const hasOpenAiKey = useStore((s) => s.hasOpenAiKey);
@@ -526,8 +547,14 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
   // with `?? false` displayed OFF while the feature was actually running.
   const [freeflowEnabled, setFreeflowEnabled] = useState(config.freeflowEnabled !== false);
   const [groqKey, setGroqKey] = useState(config.groqApiKey ?? '');
-  const [freeflowModel, setFreeflowModel] = useState(config.freeflowModel ?? 'whisper-large-v3-turbo');
+  const [freeflowProvider, setFreeflowProvider] = useState<SttProviderId>(
+    isSttProviderId(config.freeflowProvider) ? config.freeflowProvider : 'groq'
+  );
+  const [freeflowModel, setFreeflowModel] = useState(
+    config.freeflowModel ?? resolveSttProvider(config.freeflowProvider).defaultModel
+  );
   const [showGroqKey, setShowGroqKey] = useState(false);
+  const [ctripTokenPresent, setCtripTokenPresent] = useState<boolean | null>(null);
   const [freeflowBusy, setFreeflowBusy] = useState(false);
   const [freeflowNote, setFreeflowNote] = useState('');
   // rt-9 idle-tunable: realtime voice idle auto-disconnect window (ms); 0 = never.
@@ -552,11 +579,26 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
       setSlackChannel(cc.slackChannelId ?? '');
       setSlackPort(String(cc.slackPort ?? 3847));
       setSlackProactivePosting(cc.slackProactivePosting ?? false);
+      setSeatHubUrl(cc.seatHubUrl ?? '');
+      setSeatHubToken(cc.seatHubToken ?? '');
+      setSeatHubListen(cc.seatHubListen === true);
+      setSeatHubPort(String(cc.seatHubPort ?? 3851));
+      setSeatHubBind(cc.seatHubBind ?? '127.0.0.1');
       const kgOn = (cc as { knowledgeGraph?: { enabled?: boolean } }).knowledgeGraph?.enabled === true;
       setKgEnabled(kgOn);
       setFreeflowEnabled(cc.freeflowEnabled !== false);
       setGroqKey(cc.groqApiKey ?? '');
-      setFreeflowModel(cc.freeflowModel ?? 'whisper-large-v3-turbo');
+      const provider: SttProviderId = isSttProviderId(cc.freeflowProvider) ? cc.freeflowProvider : 'groq';
+      setFreeflowProvider(provider);
+      const stt = resolveSttProvider(provider);
+      const saved = cc.freeflowModel;
+      setFreeflowModel(stt.models.some((m) => m.id === saved) ? saved! : stt.defaultModel);
+      void window.cth.freeflowCtripTokenPresent().then((r) => {
+        if (alive) {
+          setCtripTokenPresent(r.present);
+          setHasCtripAsrTokenStore(r.present);
+        }
+      }).catch(() => { if (alive) setCtripTokenPresent(false); });
       setIdleDisconnectMs((c as HarnessConfig).realtimeIdleDisconnectMs ?? 180_000);
     }).catch(() => { /* keep prop-seeded values */ });
     window.cth.kgStatus().then((s) => { if (alive) setKgDocCount(s.docCount); })
@@ -568,6 +610,11 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
       setRunning(s.running);
       if (s.url) setTunnelUrl(s.url);
     }).catch(() => { /* status unavailable - assume not running */ });
+    window.cth.seatHubStatus?.().then((s) => {
+      if (!alive) return;
+      setSeatHubListening(s.listening);
+      if (s.url) setSeatHubListenUrl(s.url);
+    }).catch(() => { /* hub status optional */ });
     // Triggers: re-read main and push the result into the shared mirror. App
     // already seeded it at launch; this catches anything the Triggers tab (or
     // another window) changed since, and is the ONLY place Settings reads them —
@@ -748,12 +795,19 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
       await window.cth.freeflowSetConfig({
         enabled,
         apiKey: groqKey,
-        model: freeflowModel.trim() || 'whisper-large-v3-turbo'
+        provider: freeflowProvider,
+        model: freeflowModel.trim() || resolveSttProvider(freeflowProvider).defaultModel
       });
       setFreeflowEnabledStore(enabled);
-      // Mirror boolean key-presence so the voice button enables/disables live
-      // without an app restart (presence only — never the key value).
-      setHasGroqKeyStore(!!groqKey.trim());
+      // Mirror boolean credential presence so the voice button enables/disables live
+      // without an app restart (presence only — never the key/token value).
+      if (freeflowProvider === 'ctrip') {
+        const { present } = await window.cth.freeflowCtripTokenPresent();
+        setCtripTokenPresent(present);
+        setHasCtripAsrTokenStore(present);
+      } else {
+        setHasGroqKeyStore(!!groqKey.trim());
+      }
       setFreeflowNote('saved');
     } catch (e) {
       setFreeflowNote(e instanceof Error ? e.message : String(e));
@@ -1094,6 +1148,39 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
 
                       <div style={{ height: 1, background: 'var(--cth-ink-300)' }} />
 
+                      <div>
+                        <div style={sectionHead}>
+                          {t('settings.general.maxLiveAgents')}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <span style={{ fontSize: 13, lineHeight: '20px', color: 'var(--cth-ink-900)' }}>
+                              {t('settings.general.maxLiveAgents')}
+                            </span>
+                            <span style={{ fontSize: 12, lineHeight: '16px', color: 'var(--cth-ink-500)' }}>
+                              {t('settings.general.maxLiveAgentsDesc')}
+                            </span>
+                          </div>
+                          <input
+                            type="number"
+                            min={1}
+                            max={32}
+                            step={1}
+                            value={maxActiveVal}
+                            onChange={(e) => setMaxActiveVal(e.target.value)}
+                            onBlur={() => {
+                              const patch = maxActivePatch();
+                              setMaxActiveVal(String(patch.maxActiveAgents ?? 5));
+                              stage(patch);
+                            }}
+                            style={{ ...slackInputStyle, width: 88 }}
+                            aria-label={t('settings.general.maxLiveAgents')}
+                          />
+                        </div>
+                      </div>
+
+                      <div style={{ height: 1, background: 'var(--cth-ink-300)' }} />
+
                       {/* Desktop notifications toggle */}
                       <div>
                         <div style={sectionHead}>
@@ -1427,6 +1514,8 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
                     <>
                       <McpDefaultsSettings config={config} />
                       <div style={{ height: 1, background: 'var(--cth-ink-300)' }} />
+                      <BrowserDesktopSettings config={config} />
+                      <div style={{ height: 1, background: 'var(--cth-ink-300)' }} />
                     </>
                   )}
 
@@ -1436,6 +1525,110 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
                           Leads the section; the hardcoded Slack/Webhook/Free Flow
                           blocks below stay as-is. */}
                       <IntegrationsRegistry />
+
+                      <div style={sectionRule} />
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        <div style={sectionHeadTight}>
+                          {t('settings.connections.seatHub')}
+                        </div>
+                        <div style={{ fontSize: 12, lineHeight: '16px', color: 'var(--cth-ink-500)' }}>
+                          {t('settings.connections.seatHubDesc')}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                          <span style={{
+                            fontSize: 12, lineHeight: '16px',
+                            color: seatHubListening ? 'var(--cth-mint-700, #1f7a4d)' : 'var(--cth-ink-500)'
+                          }}>
+                            {seatHubListening
+                              ? t('settings.connections.seatHubListening', { url: seatHubListenUrl || '…' })
+                              : t('settings.connections.seatHubIdle')}
+                          </span>
+                          <PixelButton
+                            variant={seatHubListen ? 'primary' : 'secondary'}
+                            size="sm"
+                            onClick={() => setSeatHubListen((v) => !v)}
+                          >
+                            {seatHubListen ? t('common.on') : t('common.off')}
+                          </PixelButton>
+                        </div>
+                        <div style={{ display: 'flex', gap: 16 }}>
+                          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
+                            <span style={slackLabelStyle}>{t('settings.connections.seatHubUrl')}</span>
+                            <input
+                              value={seatHubUrl}
+                              onChange={(e) => setSeatHubUrl(e.target.value)}
+                              placeholder="http://192.168.1.10:3851"
+                              style={{ ...slackInputStyle, fontFamily: 'var(--cth-font-mono)' }}
+                            />
+                          </label>
+                          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
+                            <span style={slackLabelStyle}>{t('settings.connections.seatHubToken')}</span>
+                            <input
+                              type="password"
+                              value={seatHubToken}
+                              onChange={(e) => setSeatHubToken(e.target.value)}
+                              placeholder={t('settings.connections.seatHubTokenPlaceholder')}
+                              style={{ ...slackInputStyle, fontFamily: 'var(--cth-font-mono)' }}
+                            />
+                          </label>
+                        </div>
+                        <div style={{ display: 'flex', gap: 16 }}>
+                          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 100 }}>
+                            <span style={slackLabelStyle}>{t('settings.connections.port')}</span>
+                            <input
+                              value={seatHubPort}
+                              onChange={(e) => setSeatHubPort(e.target.value)}
+                              style={{ ...slackInputStyle, fontFamily: 'var(--cth-font-mono)' }}
+                            />
+                          </label>
+                          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
+                            <span style={slackLabelStyle}>{t('settings.connections.seatHubBind')}</span>
+                            <input
+                              value={seatHubBind}
+                              onChange={(e) => setSeatHubBind(e.target.value)}
+                              placeholder="127.0.0.1"
+                              style={{ ...slackInputStyle, fontFamily: 'var(--cth-font-mono)' }}
+                            />
+                          </label>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <PixelButton
+                            size="sm"
+                            disabled={seatHubBusy}
+                            onClick={() => {
+                              void (async () => {
+                                setSeatHubBusy(true); setSeatHubNote('');
+                                try {
+                                  await window.cth.updateConfig({
+                                    seatHubUrl: seatHubUrl.trim(),
+                                    seatHubToken,
+                                    seatHubListen,
+                                    seatHubPort: Number(seatHubPort) || 3851,
+                                    seatHubBind: seatHubBind.trim() || '127.0.0.1'
+                                  });
+                                  const res = seatHubListen
+                                    ? await window.cth.seatHubStart()
+                                    : await window.cth.seatHubStop();
+                                  setSeatHubListening(res.listening);
+                                  const listenUrl = 'url' in res && typeof res.url === 'string' ? res.url : '';
+                                  if (listenUrl) setSeatHubListenUrl(listenUrl);
+                                  setSeatHubNote(res.ok
+                                    ? (res.listening ? t('settings.connections.listening') : t('settings.connections.stopped'))
+                                    : (res.error ?? 'failed'));
+                                } catch (e) {
+                                  setSeatHubNote(e instanceof Error ? e.message : String(e));
+                                } finally { setSeatHubBusy(false); }
+                              })();
+                            }}
+                          >
+                            {t('common.save')}
+                          </PixelButton>
+                          {seatHubNote && (
+                            <span style={{ fontSize: 12, color: 'var(--cth-ink-500)' }}>{seatHubNote}</span>
+                          )}
+                        </div>
+                      </div>
 
                       <div style={sectionRule} />
 
@@ -1922,35 +2115,94 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
 
                         {freeflowEnabled && (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                            {/* Groq API key — stored in main config, used only there. */}
-                            <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                              <span style={slackLabelStyle}>{t('settings.voice.groqKey')}</span>
-                              <div style={{ display: 'flex', gap: 6 }}>
-                                <input
-                                  type={showGroqKey ? 'text' : 'password'}
-                                  value={groqKey}
-                                  onChange={(e) => setGroqKey(e.target.value)}
-                                  placeholder={t('settings.voice.groqPlaceholder')}
-                                  style={{ ...slackInputStyle, fontFamily: 'var(--cth-font-mono)' }}
-                                />
-                                <PixelButton variant="secondary" size="sm" onClick={() => setShowGroqKey((v) => !v)} disabled={!groqKey}>
-                                  {showGroqKey ? t('common.hide') : t('common.show')}
-                                </PixelButton>
-                              </div>
+                            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 280 }}>
+                              <span style={slackLabelStyle}>{t('settings.voice.provider')}</span>
+                              <select
+                                value={freeflowProvider}
+                                onChange={(e) => {
+                                  const id = e.target.value;
+                                  const next: SttProviderId = isSttProviderId(id) ? id : 'groq';
+                                  setFreeflowProvider(next);
+                                  setFreeflowModel(resolveSttProvider(next).defaultModel);
+                                }}
+                                style={{ ...slackInputStyle }}
+                              >
+                                {(Object.keys(STT_PROVIDERS) as SttProviderId[]).map((id) => (
+                                  <option key={id} value={id}>
+                                    {t(id === 'siliconflow'
+                                      ? 'settings.voice.providerSiliconFlow'
+                                      : id === 'ctrip'
+                                        ? 'settings.voice.providerCtrip'
+                                        : 'settings.voice.providerGroq')}
+                                  </option>
+                                ))}
+                              </select>
+                              <span style={{ fontSize: 12, lineHeight: '16px', color: 'var(--cth-ink-500)' }}>
+                                {t(freeflowProvider === 'siliconflow'
+                                  ? 'settings.voice.providerSiliconFlowHint'
+                                  : freeflowProvider === 'ctrip'
+                                    ? 'settings.voice.providerCtripHint'
+                                    : 'settings.voice.providerGroqHint')}
+                              </span>
                             </label>
 
-                            {/* Model picker */}
-                            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 280 }}>
-                              <span style={slackLabelStyle}>{t('settings.voice.model')}</span>
-                              <select
-                                value={freeflowModel}
-                                onChange={(e) => setFreeflowModel(e.target.value)}
-                                style={{ ...slackInputStyle, fontFamily: 'var(--cth-font-mono)' }}
-                              >
-                                <option value="whisper-large-v3-turbo">{t('settings.voice.fast')}</option>
-                                <option value="whisper-large-v3">{t('settings.voice.accurate')}</option>
-                              </select>
-                            </label>
+                            {freeflowProvider === 'ctrip' ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                <span style={slackLabelStyle}>CXB_ASR_TOKEN</span>
+                                <span style={{
+                                  fontSize: 12,
+                                  lineHeight: '16px',
+                                  color: ctripTokenPresent
+                                    ? 'var(--cth-success-700, #2d6a4f)'
+                                    : 'var(--cth-danger-700, #9b2226)'
+                                }}>
+                                  {ctripTokenPresent === null
+                                    ? '…'
+                                    : ctripTokenPresent
+                                      ? t('settings.voice.ctripTokenConfigured')
+                                      : t('settings.voice.ctripTokenMissing')}
+                                </span>
+                              </div>
+                            ) : (
+                              /* STT API key — stored in main config, used only there. */
+                              <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                <span style={slackLabelStyle}>
+                                  {t(freeflowProvider === 'siliconflow'
+                                    ? 'settings.voice.siliconflowKey'
+                                    : 'settings.voice.groqKey')}
+                                </span>
+                                <div style={{ display: 'flex', gap: 6 }}>
+                                  <input
+                                    type={showGroqKey ? 'text' : 'password'}
+                                    value={groqKey}
+                                    onChange={(e) => setGroqKey(e.target.value)}
+                                    placeholder={t(freeflowProvider === 'siliconflow'
+                                      ? 'settings.voice.siliconflowPlaceholder'
+                                      : 'settings.voice.groqPlaceholder')}
+                                    style={{ ...slackInputStyle, fontFamily: 'var(--cth-font-mono)' }}
+                                  />
+                                  <PixelButton variant="secondary" size="sm" onClick={() => setShowGroqKey((v) => !v)} disabled={!groqKey}>
+                                    {showGroqKey ? t('common.hide') : t('common.show')}
+                                  </PixelButton>
+                                </div>
+                              </label>
+                            )}
+
+                            {/* Model picker — ctrip-broker has a fixed backend, no user choice. */}
+                            {STT_PROVIDERS[freeflowProvider].kind !== 'ctrip-broker' && (
+                              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 280 }}>
+                                <span style={slackLabelStyle}>{t('settings.voice.model')}</span>
+                                <select
+                                  value={freeflowModel}
+                                  onChange={(e) => setFreeflowModel(e.target.value)}
+                                  style={{ ...slackInputStyle, fontFamily: 'var(--cth-font-mono)' }}
+                                >
+                                  {STT_PROVIDERS[freeflowProvider].models.map((m) => (
+                                    <option key={m.id} value={m.id}>{t(`settings.voice.${m.labelKey}`)}</option>
+                                  ))}
+                                </select>
+                              </label>
+                            )}
 
                             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                               <PixelButton variant="ghost" size="sm" onClick={() => saveFreeflow()} disabled={freeflowBusy}>

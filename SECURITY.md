@@ -3,9 +3,33 @@
 ## Scope
 
 Munder Difflin is a **local-first desktop app**. It spawns local processes in PTYs and
-reads/writes files under directories you register. It opens **no network listeners
-beyond a local Unix domain socket** used for the in-app hook server, and has no auth or
-remote surface by design.
+reads/writes files under directories you register. Network exposure is limited to
+**localhost-only** services described below; there is no remote auth surface by design.
+
+### Local listeners and IPC
+
+| Surface | Bind / path | Purpose |
+|---|---|---|
+| Hook server | Unix domain socket under the harness home | In-app hook delivery |
+| Browser bridge | **WebSocket on `127.0.0.1` only** (configurable port, default 9777) | Chrome extension ↔ CDP relay; token required |
+| Automation bridge | **Unix domain socket** (or Windows named pipe) under the harness home | stdio MCP scripts (`browser-bridge`, `desktop-control`) talk to main |
+
+The browser bridge **never** binds `0.0.0.0`. The bridge token lives in local harness
+config only — it is **never** included in hire manifests or exported to agents.
+
+### Automation MCP (consent-gated, dangerous when enabled)
+
+Two write-tier MCP servers ship **off by default**:
+
+- **`browser-bridge`** — agents can drive Chrome tabs attached via the extension
+  (navigate, click, type, evaluate JS in page context).
+- **`desktop-control`** — agents get **full desktop scope** when you consent: move the
+  pointer, click anywhere on screen, type, capture screenshots, and press hotkeys
+  **without per-action confirmation**. This is intentionally powerful and risky.
+
+Both require explicit user consent in Settings (or at hire import) before they are
+merged into an agent session. macOS may additionally require Screen Recording and
+Accessibility permissions for desktop control.
 
 ## Supported versions
 

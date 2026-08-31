@@ -1,6 +1,6 @@
 {
   "name": "munder-difflin",
-  "version": "0.4.6",
+  "version": "0.5.0",
   "private": true,
   "description": "Clones for you and your team, working 24/7 — a free, local-first multi-agent harness that turns the CLI coding agent you already run into a clone of you, coordinating an office of agents on your machine.",
   "main": "out/main/index.js",
@@ -38,7 +38,9 @@
     "@codemirror/state": "^6.6.0",
     "@codemirror/view": "^6.43.0",
     "@lezer/highlight": "^1.2.3",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@monaco-editor/react": "^4.7.0",
+    "@nut-tree/nut-js": "^3.1.2",
     "@openai/agents-realtime": "^0.11.8",
     "@uiw/react-codemirror": "^4.25.10",
     "@xterm/addon-fit": "^0.10.0",
@@ -60,6 +62,7 @@
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "tunnelmole": "^2.4.0",
+    "ws": "^7.5.13",
     "zustand": "^4.5.5"
   },
   "devDependencies": {
@@ -70,6 +73,7 @@
     "@types/node": "^22.7.5",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.0",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.3.2",
     "electron": "^32.2.0",
     "electron-builder": "^25.1.8",

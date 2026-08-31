@@ -32,9 +32,13 @@ import {
   providerPreset,
   tokenizeCommand,
   AGENT_PROVIDER_PRESETS,
+  DEFAULT_AGENT_PROVIDER,
+  resolveAgentProvider,
   type AgentProvider
 } from '@/store/config';
 import { canReceiveInbox } from '@shared/agentProvider';
+import { formatFloorAddress } from '@shared/floorAddress';
+import { FlowTab } from './FlowTab';
 import { isComposingKey } from '@shared/imeGuard';
 import { useRtl } from '@/i18n/useDirection';
 
@@ -46,7 +50,7 @@ import { useRtl } from '@/i18n/useDirection';
 // Both the AskMe (#human) tab and the Triggers tab live here. Triggers replaced
 // the old Schedules tab: schedules are now one of four trigger types, and the
 // whole surface lives in ./triggers (see src/shared/triggers.ts for the contract).
-type CCTab = 'terminal' | 'floor' | 'tasks' | 'human' | 'triggers' | 'trigger-history'
+type CCTab = 'terminal' | 'floor' | 'tasks' | 'flow' | 'human' | 'triggers' | 'trigger-history'
   | 'memory' | 'graph' | 'activity' | 'skills' | 'workers';
 
 /** Fallback denominator for the per-agent token meter when no floor token budget
@@ -69,6 +73,7 @@ const TABS: { key: CCTab; labelKey: string; icon: Parameters<typeof Icon>[0]['na
   { key: 'terminal', labelKey: 'commandCenter.tabs.terminal', icon: 'terminal' },
   { key: 'floor', labelKey: 'commandCenter.tabs.floor', icon: 'mcp' },
   { key: 'tasks', labelKey: 'commandCenter.tabs.tasks', icon: 'check' },
+  { key: 'flow', labelKey: 'commandCenter.tabs.flow', icon: 'ledger' },
   { key: 'human', labelKey: 'commandCenter.tabs.human', icon: 'bell' },
   { key: 'triggers', labelKey: 'commandCenter.tabs.triggers', icon: 'clock' },
   { key: 'trigger-history', labelKey: 'commandCenter.tabs.history', icon: 'ledger' },
@@ -321,6 +326,7 @@ export function CommandCenterPanel({ agent, fullscreen = false }: { agent: Agent
         )}
         {tab === 'floor' && <FloorTab seed={dispatchSeed} />}
         {tab === 'tasks' && <TasksKanban />}
+        {tab === 'flow' && <FlowTab />}
         {tab === 'human' && <AskMeTab />}
         {tab === 'triggers' && <TriggersTab />}
         {tab === 'trigger-history' && <TriggerHistoryTab />}
@@ -334,7 +340,7 @@ export function CommandCenterPanel({ agent, fullscreen = false }: { agent: Agent
           />
         )}
         {tab === 'activity' && <ActivityTab />}
-        {tab === 'skills' && <SkillsTab agentCwd={agent.cwd} />}
+        {tab === 'skills' && <SkillsTab agentCwd={agent.cwd} agentId={agent.id} />}
         {tab === 'workers' && <WorkersTab />}
       </div>
     </PixelPanel>
@@ -347,6 +353,8 @@ function FloorTab({ seed }: { seed: { text: string; seq: number } }) {
   const { t } = useTranslation();
   const rtl = useRtl();
   const agents = useStore((s) => s.agents);
+  const projects = useStore((s) => s.projects);
+  const activeProjectId = useStore((s) => s.activeProjectId);
   const godName = agents.find((a) => a.isGod)?.name ?? 'the orchestrator';
   const select = useStore((s) => s.select);
   const updateAgent = useStore((s) => s.updateAgent);
@@ -361,7 +369,7 @@ function FloorTab({ seed }: { seed: { text: string; seq: number } }) {
   // Per-agent token limit (overrides the floor budget for that agent), keyed by id.
   const [agentTokenCaps, setAgentTokenCaps] = useState<Record<string, number>>({});
   const [restarting, setRestarting] = useState<string | null>(null);
-  const [engineProvider, setEngineProvider] = useState<AgentProvider>('claude');
+  const [engineProvider, setEngineProvider] = useState<AgentProvider>(DEFAULT_AGENT_PROVIDER);
   const [engineModel, setEngineModel] = useState<string | undefined>(undefined);
   const [restartErrors, setRestartErrors] = useState<Record<string, string>>({});
   // The harness's own default model (Settings → default model). Michael and every
@@ -369,6 +377,7 @@ function FloorTab({ seed }: { seed: { text: string; seq: number } }) {
   // reading "default" was the CLI's, which is a different thing entirely.
   const [defaultModel, setDefaultModel] = useState<string | undefined>(undefined);
   const [dispatchTo, setDispatchTo] = useState<string>(''); // '' = Michael decides
+  const [dispatchFloor, setDispatchFloor] = useState('');
   const [dispatchText, setDispatchText] = useState('');
   const [dispatchMsg, setDispatchMsg] = useState<string | null>(null);
   // ── ISSUES section state ──
@@ -382,7 +391,7 @@ function FloorTab({ seed }: { seed: { text: string; seq: number } }) {
       setRepos(c.registeredRepos ?? []);
       setTokenCap(c.costCapTokens);
       setAgentTokenCaps(c.agentTokenCaps ?? {});
-      setEngineProvider(c.godProvider ?? 'claude');
+      setEngineProvider(resolveAgentProvider(c.godProvider));
       setEngineModel(c.godModel);
       setDefaultModel(c.defaultModel);
     }).catch(() => { /* noop */ });
@@ -506,7 +515,8 @@ function FloorTab({ seed }: { seed: { text: string; seq: number } }) {
         hive,
         resume,
         resumeSessionId,
-        requireResume: resume
+        requireResume: resume,
+        projectId: useStore.getState().activeProjectId ?? undefined
       });
       if (!res.ok) throw new Error(res.error ?? 'Restart failed.');
       if (resume && res.resumed !== true) {
@@ -559,15 +569,22 @@ function FloorTab({ seed }: { seed: { text: string; seq: number } }) {
     const full = suggested
       ? `${body}\n\n${t('commandCenter.dispatchSuggestion', { name: suggested.name, id: suggested.id })}`
       : body;
+    const otherFloor = dispatchFloor && dispatchFloor !== activeProjectId;
+    const to = otherFloor ? formatFloorAddress(dispatchFloor, 'god') : 'god';
+    const floorName = otherFloor
+      ? (projects.find((p) => p.projectId === dispatchFloor)?.name ?? dispatchFloor)
+      : undefined;
     const res = await window.cth.hiveSend(
-      { to: 'god', act: 'request', subject: t('commandCenter.taskFromHuman'), body: full },
+      { to, act: 'request', subject: t('commandCenter.taskFromHuman'), body: full },
       'human'
     );
     setDispatchText('');
     setDispatchMsg(res.ok
-      ? suggested
-        ? t('commandCenter.sentToWithSuggestion', { godName, name: suggested.name })
-        : t('commandCenter.sentToMichael', { godName })
+      ? floorName
+        ? t('commandCenter.sentToFloor', { floor: floorName })
+        : suggested
+          ? t('commandCenter.sentToWithSuggestion', { godName, name: suggested.name })
+          : t('commandCenter.sentToMichael', { godName })
       : t('commandCenter.dispatchFailed', { error: res.error ?? '?' }));
     setTimeout(() => setDispatchMsg(null), 4000);
   };
@@ -650,6 +667,19 @@ function FloorTab({ seed }: { seed: { text: string; seq: number } }) {
             ))}
           </Select>
         </div>
+        {projects.length > 1 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+            <span style={{ fontFamily: 'var(--cth-font-display)', fontSize: 8, color: 'var(--cth-ink-500)', flexShrink: 0 }}>
+              {t('commandCenter.dispatchFloor')}
+            </span>
+            <Select value={dispatchFloor} onChange={setDispatchFloor}>
+              <option value="">{t('commandCenter.thisFloor')}</option>
+              {projects.filter((p) => p.projectId !== activeProjectId).map((p) => (
+                <option key={p.projectId} value={p.projectId}>{p.name}</option>
+              ))}
+            </Select>
+          </div>
+        )}
         <textarea
           dir={rtl ? 'auto' : undefined}
           value={dispatchText}
@@ -874,10 +904,11 @@ function FloorTab({ seed }: { seed: { text: string; seq: number } }) {
                 >
                   {AGENT_PROVIDER_PRESETS.filter((p) => canReceiveInbox(p.id)).map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.label}{p.id === 'claude' ? ' ★' : ''}
+                      {p.label}{p.id === DEFAULT_AGENT_PROVIDER ? ' ★' : ''}
                     </option>
                   ))}
                 </Select>
+                {providerPreset(engineProvider).supportsModel && (
                 <Select
                   value={engineModel ?? ''}
                   disabled={restarting === a.id}
@@ -887,6 +918,7 @@ function FloorTab({ seed }: { seed: { text: string; seq: number } }) {
                     <option key={m.label} value={m.id ?? ''}>{m.label}</option>
                   ))}
                 </Select>
+                )}
                 <PixelButton
                   variant="secondary"
                   size="sm"
@@ -1269,9 +1301,9 @@ function ActivityTab() {
       <Section title={t('commandCenter.activity')}>
         {log.length === 0 && <Muted>{t('commandCenter.nothingYet')}</Muted>}
         {[...log].reverse().map((e, i) => (
-          <div key={i} style={{ fontSize: 12, color: 'var(--cth-ink-700)', padding: '2px 0', display: 'flex', gap: 6 }}>
+          <div key={i} style={{ fontSize: 12, color: 'var(--cth-ink-700)', padding: '2px 0', display: 'flex', gap: 6, overflowX: 'auto' }}>
             <span style={{ color: 'var(--cth-ink-300)', flexShrink: 0 }}>{e.kind ?? '·'}</span>
-            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fmt(e)}</span>
+            <span style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>{fmt(e)}</span>
           </div>
         ))}
       </Section>

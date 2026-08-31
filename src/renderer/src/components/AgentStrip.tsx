@@ -21,13 +21,13 @@ export function AgentStrip({ config }: AgentStripProps) {
   const restorableAgents = useStore(s => s.restorableAgents);
   const selectedId = useStore(s => s.selectedId);
   const select = useStore(s => s.select);
-  const setAddAgentOpen = useStore(s => s.setAddAgentOpen);
+  const setRolePickerOpen = useStore(s => s.setRolePickerOpen);
   const openTaskDetail = useStore(s => s.openTaskDetail);
   const reorderAgents = useStore(s => s.reorderAgents);
   const renameAgent = useStore(s => s.renameAgent);
   const setAgentNote = useStore(s => s.setAgentNote);
   // Shared with the fullscreen roster so both show one restore in progress.
-  const { restoring, autoRestoring, restoreTeam } = useRestoreTeam(config);
+  const { restoring, autoRestoring, restoreNote, restoreTeam } = useRestoreTeam(config);
   // ONE restore control (bottom-right): a button whose dropdown OPENS UPWARD and
   // lists last session's agents with per-agent dismiss. The menu is position:
   // fixed (anchored off the button's rect) because the strip scrolls with
@@ -235,7 +235,7 @@ export function AgentStrip({ config }: AgentStripProps) {
         variant="secondary"
         size="lg"
         style={{ alignSelf: 'center', flexShrink: 0 }}
-        onClick={() => setAddAgentOpen(true)}
+        onClick={() => setRolePickerOpen(true)}
       >
         <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', whiteSpace: 'nowrap' }}>
           <Icon name="plus" /> {t('agentStrip.addAgent')}
@@ -244,27 +244,43 @@ export function AgentStrip({ config }: AgentStripProps) {
       {/* ONE restore control, pinned to the strip's right edge. Busy (manual OR
           boot auto-restore) collapses to a single disabled "restoring your
           team…"; otherwise the button opens an upward dropdown listing last
-          session's agents (per-agent ✕ dismiss + restore all). No outcome note
-          is rendered afterwards — the restored agents appearing IS the outcome. */}
-      {(restorableAgents.length > 0 || restoreBusy) && (
+          session's agents (per-agent ✕ dismiss + restore all). Outcome note
+          surfaces spawn failures so the control never looks inert. */}
+      {(restorableAgents.length > 0 || restoreBusy || restoreNote) && (
         <span
           ref={restoreBtnRef}
-          style={{ alignSelf: 'center', flexShrink: 0, marginLeft: 'auto' }}
+          style={{
+            alignSelf: 'center', flexShrink: 0, marginLeft: 'auto',
+            display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4
+          }}
           title={restoreBusy
             ? t('agentStrip.restoringTitle')
-            : t('agentStrip.restoreTitle', { names: restorableAgents.map((a: Agent) => a.name).join(', ') })}
+            : restorableAgents.length > 0
+              ? t('agentStrip.restoreTitle', { names: restorableAgents.map((a: Agent) => a.name).join(', ') })
+              : (restoreNote ?? undefined)}
         >
-          <PixelButton
-            variant="primary"
-            size="lg"
-            disabled={restoreBusy}
-            onClick={() => toggleRestoreMenu(restoreBtnRef.current)}
-          >
-            <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', whiteSpace: 'nowrap' }}>
-              <Icon name="play" />
-              {restoreBusy ? t('agentStrip.restoringTeam') : t('agentStrip.restoreTeam', { count: restorableAgents.length })}
+          {(restorableAgents.length > 0 || restoreBusy) && (
+            <PixelButton
+              variant="primary"
+              size="lg"
+              disabled={restoreBusy}
+              onClick={() => toggleRestoreMenu(restoreBtnRef.current)}
+            >
+              <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', whiteSpace: 'nowrap' }}>
+                <Icon name="play" />
+                {restoreBusy ? t('agentStrip.restoringTeam') : t('agentStrip.restoreTeam', { count: restorableAgents.length })}
+              </span>
+            </PixelButton>
+          )}
+          {restoreNote && !restoreBusy && (
+            <span style={{
+              maxWidth: 280, fontSize: 11, lineHeight: '14px',
+              color: restoreNote.includes('failed') ? 'var(--cth-coral-700)' : 'var(--cth-ink-500)',
+              textAlign: 'right'
+            }}>
+              {restoreNote}
             </span>
-          </PixelButton>
+          )}
         </span>
       )}
       {restoreMenuOpen && restoreMenuPos && restorableAgents.length > 0 && (

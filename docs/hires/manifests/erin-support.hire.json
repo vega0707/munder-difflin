@@ -24,7 +24,8 @@
   "homepage": "https://github.com/chaitanyagiri/munder-difflin",
   "skills": [
     "md-hive-sync",
-    "md-fetch-summarize"
+    "md-fetch-summarize",
+    "today"
   ],
   "mcpServers": [
     "sequential-thinking",

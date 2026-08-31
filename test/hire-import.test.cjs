@@ -8,6 +8,7 @@ const { join } = require('node:path');
 const loadTs = require('./load-ts.cjs');
 
 const { readHireManifestFiles } = loadTs('src/main/hire.ts');
+const { validateHireManifest } = loadTs('src/shared/hire.ts');
 
 const manifest = (name) => ({ spec: 'munder-difflin/hire@1', name });
 
@@ -96,6 +97,42 @@ test('batch token caps persist atomically before review advances', () => {
     'the latest config must be returned to App before the next review');
   assert.doesNotMatch(submitFlow, /agentTokenCaps:\s*\{\s*\.\.\.\(config\.agentTokenCaps/,
     'renderer must never replace the cap map from a stale config snapshot');
+});
+
+test('hire import surfaces consent for write-tier automation MCP ids', () => {
+  const withBrowser = validateHireManifest({
+    spec: 'munder-difflin/hire@1',
+    name: 'Browser Bot',
+    mcpServers: ['browser-bridge']
+  });
+  assert.equal(withBrowser.ok, true);
+  assert.deepEqual(withBrowser.consentRequired, ['browser-bridge']);
+
+  const withDesktop = validateHireManifest({
+    spec: 'munder-difflin/hire@1',
+    name: 'Desktop Bot',
+    mcpServers: ['desktop-control']
+  });
+  assert.equal(withDesktop.ok, true);
+  assert.deepEqual(withDesktop.consentRequired, ['desktop-control']);
+
+  const withBoth = validateHireManifest({
+    spec: 'munder-difflin/hire@1',
+    name: 'Full Auto',
+    mcpServers: ['browser-bridge', 'desktop-control', 'filesystem']
+  });
+  assert.equal(withBoth.ok, true);
+  assert.deepEqual(withBoth.consentRequired, ['browser-bridge', 'desktop-control']);
+});
+
+test('hire import accepts bundled automation skill ids', () => {
+  const result = validateHireManifest({
+    spec: 'munder-difflin/hire@1',
+    name: 'Auto Worker',
+    skills: ['browser-automation', 'desktop-automation']
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.manifest.skills, ['browser-automation', 'desktop-automation']);
 });
 
 test('Command Center sets and clears one cap through the atomic IPC', () => {

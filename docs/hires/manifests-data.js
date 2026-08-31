@@ -699,7 +699,9 @@ window.HIRES_DATA = [
       "homepage": "https://github.com/chaitanyagiri/munder-difflin",
       "skills": [
         "md-hive-sync",
-        "md-fetch-summarize"
+        "md-fetch-summarize",
+        "temporal",
+        "today"
       ],
       "mcpServers": [
         "sequential-thinking",
@@ -735,7 +737,9 @@ window.HIRES_DATA = [
           "homepage": "https://github.com/chaitanyagiri/munder-difflin",
           "skills": [
             "md-hive-sync",
-            "md-fetch-summarize"
+            "md-fetch-summarize",
+            "temporal",
+            "today"
           ],
           "mcpServers": [
             "sequential-thinking",
@@ -769,7 +773,9 @@ window.HIRES_DATA = [
           "homepage": "https://github.com/chaitanyagiri/munder-difflin",
           "skills": [
             "md-hive-sync",
-            "md-fetch-summarize"
+            "md-fetch-summarize",
+            "temporal",
+            "today"
           ],
           "mcpServers": [
             "sequential-thinking",
@@ -803,7 +809,9 @@ window.HIRES_DATA = [
           "homepage": "https://github.com/chaitanyagiri/munder-difflin",
           "skills": [
             "md-hive-sync",
-            "md-fetch-summarize"
+            "md-fetch-summarize",
+            "temporal",
+            "today"
           ],
           "mcpServers": [
             "sequential-thinking",
@@ -1879,7 +1887,8 @@ window.HIRES_DATA = [
       "homepage": "https://github.com/chaitanyagiri/munder-difflin",
       "skills": [
         "md-hive-sync",
-        "md-fetch-summarize"
+        "md-fetch-summarize",
+        "today"
       ],
       "mcpServers": [
         "sequential-thinking",
@@ -1920,7 +1929,8 @@ window.HIRES_DATA = [
           "homepage": "https://github.com/chaitanyagiri/munder-difflin",
           "skills": [
             "md-hive-sync",
-            "md-fetch-summarize"
+            "md-fetch-summarize",
+            "today"
           ],
           "mcpServers": [
             "sequential-thinking",
@@ -1955,7 +1965,8 @@ window.HIRES_DATA = [
           "homepage": "https://github.com/chaitanyagiri/munder-difflin",
           "skills": [
             "md-hive-sync",
-            "md-fetch-summarize"
+            "md-fetch-summarize",
+            "today"
           ],
           "mcpServers": [
             "sequential-thinking",
@@ -1990,7 +2001,8 @@ window.HIRES_DATA = [
           "homepage": "https://github.com/chaitanyagiri/munder-difflin",
           "skills": [
             "md-hive-sync",
-            "md-fetch-summarize"
+            "md-fetch-summarize",
+            "today"
           ],
           "mcpServers": [
             "sequential-thinking",
@@ -2040,7 +2052,8 @@ window.HIRES_DATA = [
         "fetch",
         "filesystem",
         "git",
-        "search-with-key"
+        "search-with-key",
+        "context7"
       ]
     },
     "baseProvider": "claude",
@@ -2081,7 +2094,8 @@ window.HIRES_DATA = [
             "fetch",
             "filesystem",
             "git",
-            "search-with-key"
+            "search-with-key",
+            "context7"
           ]
         }
       },
@@ -2116,7 +2130,8 @@ window.HIRES_DATA = [
             "fetch",
             "filesystem",
             "git",
-            "search-with-key"
+            "search-with-key",
+            "context7"
           ]
         }
       },
@@ -2151,7 +2166,8 @@ window.HIRES_DATA = [
             "fetch",
             "filesystem",
             "git",
-            "search-with-key"
+            "search-with-key",
+            "context7"
           ]
         }
       }

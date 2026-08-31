@@ -6,6 +6,53 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **Ctrip ASR for Free Flow dictation.** Export `CXB_ASR_TOKEN` in the environment (never
+  persisted); choose the 程小帮 provider in Settings → Voice or let it autoselect on boot when the
+  token is present. Hold **Option** or the mic button to dictate. Requires corp-network access to
+  `xiaobang.ctripcorp.com`.
+
+## [0.5.0] — 2026-08-31
+
+**The release that turns one office into many floors.** You can keep several projects open as
+tabs, each with its own hive and cast. A seat hub lets another machine take over a chair when
+this one dies. New floors can start from job-titled templates, and only a configurable number
+of agents hold a live engine at once — everyone else stays on the floor until a slot frees.
+
+### Added
+
+- **Multiple floors in one window.** Each project is its own hive. Tabs switch the active
+  floor; creating one still requires a god. The old single-hive directory is migrated rather
+  than thrown away.
+- **Seat hub.** Settings → Connections can serve or point at a hub. Seats, heartbeats, and
+  handoff packs live there; Claude Code and Cursor still run on the machine that claimed the
+  seat. If that machine dies, the lease expires in about 90 seconds and another runtime can
+  take the same role. The hub stores identity, memory, and inbox — not the git tree or API keys.
+- **Join a floor from the hub.** The tab bar's Join control imports a floor that is already on
+  the hub, so a second computer can pick up that project's chairs.
+- **Dev floor templates with job titles.** Full-stack squad, Product R&D, and front/back split
+  sit next to the Office templates. Roles carry a title and a short duty blurb onto the hive
+  and roster. A floor may have more seats than the live cap.
+- **A global live-agent cap.** Settings → General sets how many agents across all floors may
+  hold a live PTY (default 5). Extra seats stay on the floor and idle. When a live PTY exits
+  and someone is waiting with work, the next seat is started. The god is not counted against
+  the cap.
+- **Per-seat skill and MCP allowlists** on the template/roster (floor defaults still apply
+  when a seat omits an override).
+
+### Changed
+
+- **New agents and new floors default to the built-in engine** instead of assuming Claude Code
+  is already on the machine.
+- **The god can spawn past the live cap**, so a full floor does not block the orchestrator.
+
+### Fixed
+
+- Launch no longer opens the hive-folder picker once a harness home is already configured, and
+  hive hooks receive config as soon as that home exists.
+- Spawn paths adapt to Claude Code 2.1.x and gateway-auto environments.
+
 ## [0.4.6] — 2026-08-27
 
 **The release that speaks your language and updates itself.** The interface runs in Chinese and

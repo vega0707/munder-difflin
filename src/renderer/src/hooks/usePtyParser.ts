@@ -13,6 +13,14 @@ const TOOL_TO_STATION: Record<string, StationKind> = {
   TodoWrite: 'board', TaskCreate: 'board', TaskUpdate: 'board'
 };
 
+/** Best-effort station for MCP automation tools seen in pty tool lines. */
+function stationForPtyTool(tool: string): StationKind {
+  if (TOOL_TO_STATION[tool]) return TOOL_TO_STATION[tool];
+  if (/browser_/i.test(tool) || tool.includes('munder-browser-bridge')) return 'web';
+  if (/desktop_/i.test(tool) || tool.includes('munder-desktop-control')) return 'terminal';
+  return 'desk';
+}
+
 const TOOLKIND_BY_NAME: Record<string, ToolKind> = {
   Read: 'Read', Edit: 'Edit', Write: 'Write',
   Bash: 'Bash',
@@ -115,7 +123,7 @@ export function usePtyParser(agentId: string) {
     }
 
     if (lastTool) {
-      const station = TOOL_TO_STATION[lastTool] ?? 'desk';
+      const station = stationForPtyTool(lastTool);
       const carrying = TOOLKIND_BY_NAME[lastTool] ?? undefined;
       // Collapse space runs: translated cursor-forwards (see ansiText) can
       // stand for several columns, and the bubble shouldn't show the gaps.

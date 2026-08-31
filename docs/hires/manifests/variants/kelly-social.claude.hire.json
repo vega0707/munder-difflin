@@ -32,6 +32,7 @@
     "fetch",
     "filesystem",
     "git",
-    "search-with-key"
+    "search-with-key",
+    "context7"
   ]
 }

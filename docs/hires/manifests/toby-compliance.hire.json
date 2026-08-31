@@ -16,5 +16,13 @@
   "isolate": false,
   "tokenCap": 1000000,
   "author": "Agent Gallery",
-  "homepage": "https://github.com/chaitanyagiri/munder-difflin"
+  "homepage": "https://github.com/chaitanyagiri/munder-difflin",
+  "skills": [
+    "md-audit"
+  ],
+  "mcpServers": [
+    "filesystem",
+    "git",
+    "sequential-thinking"
+  ]
 }

@@ -6,7 +6,7 @@ import { Icon, type IconName } from './Icon';
 import { SpritePortrait } from './SpritePortrait';
 import { ProviderLogo } from './ProviderLogo';
 import { AGENT_PROVIDER_PRESETS, modelsForProvider, type AgentProvider, type HarnessConfig } from '@/store/config';
-import { canReceiveInbox, providerPreset } from '@shared/agentProvider';
+import { canReceiveInbox, DEFAULT_AGENT_PROVIDER, providerPreset } from '@shared/agentProvider';
 import {
   classifyEngineAvailability, engineAvailabilityBadge, engineAvailabilityMessage, engineBlocksOnboarding
 } from '@shared/engineAvailability';
@@ -79,6 +79,7 @@ const FEATURES: Feature[] = [
 // One-liner of what each engine is, shown under its row on the orchestrator step
 // so a non-technical user knows what they're picking (item 3).
 const PROVIDER_BLURB_KEYS: Partial<Record<AgentProvider, string>> = {
+  builtin: 'onboarding.providerBlurb.builtin',
   gemini: 'onboarding.providerBlurb.gemini',
   claude: 'onboarding.providerBlurb.claude',
   codex: 'onboarding.providerBlurb.codex',
@@ -103,10 +104,8 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
   // Anonymous usage stats (TELEMETRY.md). Default ON (opt-out); persisted by
   // finish() so unchecking before finishing means nothing is ever sent.
   const [shareStats, setShareStats] = useState<boolean>(true);
-  const [godProvider, setGodProvider] = useState<AgentProvider>('claude');
-  const [godModel, setGodModel] = useState<string | undefined>(
-    providerPreset('claude').recommendedOrchestratorModel
-  );
+  const [godProvider, setGodProvider] = useState<AgentProvider>(DEFAULT_AGENT_PROVIDER);
+  const [godModel, setGodModel] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
 
@@ -394,19 +393,20 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
                       <Trans i18nKey="onboarding.orchestrator.cliAgentPlain" components={{ strong: <strong /> }}>
                         A <strong>CLI agent</strong> is an AI coding assistant that runs on your
                         computer — popular ones are Claude Code (Anthropic), Codex (OpenAI) and
-                        Antigravity (Google Gemini). <strong>Your clone</strong> is the always-on
-                        one that runs your whole office. We recommend Claude Code on Opus 4.8 (1M).
-                        You can add or switch the others later.
+                        Antigravity (Google Gemini). You do not need one to start:
+                        <strong> Built-in</strong> is the default and needs no install.
+                        <strong> Your clone</strong> is the always-on one that runs your whole office.
+                        You can add or switch CLI engines later.
                       </Trans>
                     ) : (
                       <Trans i18nKey="onboarding.orchestrator.cliAgent" components={{ strong: <strong /> }}>
-                        Each option is a <strong>CLI engine</strong> (Claude Code, Codex,
-                        Antigravity/Gemini, or a local proxy like Qwen). Engines marked
-                        INSTALLED are already on this machine; INSTALLS ON FIRST RUN means the app
+                        Each option is an engine. <strong>Built-in</strong> is the default: no CLI
+                        to install, and it is already ready. The others are <strong>CLI engines</strong>
+                        (Claude Code, Codex, Antigravity/Gemini, Cursor, or a local proxy like Qwen).
+                        INSTALLED means the binary is on this machine; INSTALLS ON FIRST RUN means the app
                         sets it up when Michael first starts.
-                        <strong> Your clone</strong> (Michael) is the engine that orchestrates the whole
-                        hive. Recommended: Claude Code · Opus 4.8 · 1M. Other providers can be wired
-                        per agent later.
+                        <strong> Your clone</strong> (Michael) orchestrates the hive. Other providers
+                        can be wired per agent later.
                       </Trans>
                     )}
                   </span>
@@ -467,7 +467,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
                             }}>{badge}</span>
                           );
                         })()}
-                        {p.id === 'claude' && (
+                        {p.id === DEFAULT_AGENT_PROVIDER && (
                           <span style={{
                             fontSize: 10, padding: '1px 5px', lineHeight: '16px',
                             background: 'var(--cth-lemon)',
@@ -498,6 +498,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
                     </div>
                   </div>
                 )}
+                {providerPreset(godProvider).supportsModel && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <div style={{ fontSize: 12, color: 'var(--cth-ink-500)' }}>{t('onboarding.orchestrator.model')}</div>
                   <select
@@ -513,6 +514,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
                     {t('onboarding.orchestrator.modelNote')}
                   </div>
                 </div>
+                )}
               </>
             )}
 

@@ -5,9 +5,9 @@ import {
   unlinkSync, mkdirSync, renameSync, createWriteStream, copyFileSync, lstatSync,
   readlinkSync, symlinkSync
 } from 'node:fs';
-import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
+import { randomBytes, createHash, timingSafeEqual, randomUUID } from 'node:crypto';
 import { join, resolve, sep, basename, dirname, isAbsolute } from 'node:path';
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { request as httpsRequest } from 'node:https';
 import { PtyManager, type SpawnOptions } from './pty';
 import { resolveCommand as resolveCliCommand, isSafeCommandName } from './shellEnv';
@@ -25,13 +25,36 @@ import {
   getLogGraph, getCommitFiles, getFileAtRev, compareRefs, listWorktrees, checkoutRef
 } from './git';
 import { HiveManager, type AgentMeta, type HiveMessage, type HiveTask } from './hive';
-import { HookServer } from './hooks';
+import { HookServer, HookHub } from './hooks';
 import { CircuitBreaker, type BreakerInput } from './breaker';
 import type { UsageProvider } from './usage';
 import { MemoryManager } from './memory';
 import { KnowledgeManager } from './knowledge';
 import { MemoryReflector, type ReflectSettings } from './reflect';
 import { PersistStore } from './db';
+import { ProjectRegistry, projectRootOf } from './projectRegistry';
+import { resolveHive, projectIdFromPayload } from './hiveRouter';
+import { listProjectTemplates, saveProjectTemplate, deleteProjectTemplate } from './projectTemplateStore';
+import { listRoles, saveRole, deleteRole } from './roleCatalogStore';
+import { proposeRoleFromBrief } from './rolePropose';
+import { SeatBoard, FileSeatStore } from './seatBoard';
+import { SeatHub } from './seatHub';
+import { BuiltinAgentHost } from './builtinAgentHost';
+import {
+  resolveMaxActiveAgents,
+  DEFAULT_PROJECT_ID,
+  parseAgentPtyId,
+  isOfficeCharacter,
+  type CreateProjectRole,
+  type OfficeCharacterName
+} from '../shared/projectTypes';
+import { parseSeatAllowlist } from '../shared/seatTools';
+import {
+  DEFAULT_SEAT_HUB_PORT,
+  SEAT_HEARTBEAT_MS,
+  type FloorCatalog,
+  type SeatHandoff
+} from '../shared/seats';
 import { readAgentUsage, readContextTokens, seedSessionTranscript, resolveSessionCwd } from './transcript';
 import { listIssues, listCIRuns } from './github';
 import { SlackWebhookServer, SlackReplyServer, postSlackReply, type SlackEventFile } from './slack';
@@ -39,6 +62,9 @@ import {
   WebhookServer,
   type WebhookDispatch, type WebhookEndpointRef, type WebhookInbound, type WebhookTaskStatus
 } from './webhook';
+import { startBrowserBridge, stopBrowserBridge, getBrowserBridgeStatus } from './browserBridge';
+import { getDesktopPermissionStatus } from './desktopControl';
+import { startAutomationBridge, stopAutomationBridge } from './automationBridge';
 import {
   classifyInboundKind, isAutoAllowed,
   DEFAULT_CONTEXT_TRIGGER, DEFAULT_ORG_TRIGGER, DEFAULT_TRIGGER_MODE, DEFAULT_WEBHOOK_SCHEMA,
@@ -48,7 +74,14 @@ import {
 import {
   appendTriggerHistory, clearTriggerHistory, listTriggerHistory, updateTriggerHistory
 } from './triggerHistory';
-import { transcribeWithGroq, DEFAULT_GROQ_MODEL } from './freeflow';
+import {
+  loadCxbAsrTokenFromEnvFile,
+  readCxbAsrToken,
+  shouldAutoselectCtrip,
+  transcribeWithCtrip,
+  transcribeWithGroq
+} from './freeflow';
+import { resolveSttProvider, isSttProviderId } from '../shared/sttProviders';
 import { registerRealtimeIpc } from './realtime';
 import { registerRealtimeActionIpc } from './realtimeActions';
 import { initCompletionWatcher } from './realtimeCompletionWatcher';
@@ -71,11 +104,13 @@ import { parseHireDeepLink, type HireManifest } from '../shared/hire';
 import { ClosingTimeController } from './closingTime';
 import {
   argsWithAutoModeFlag,
+  defaultCommandForProvider,
   inferAgentProvider,
   isClaudeProvider,
   nonInteractiveEnvForProvider,
   providerPreset,
   installInfoForProvider,
+  resolveAgentProvider,
   type AgentProvider
 } from '../shared/agentProvider';
 import { buildMissingCliScript, chooseInstallRung } from './cliInstall';
@@ -92,6 +127,29 @@ import {
 } from '../shared/codexRemote';
 
 const isDev = !!process.env.ELECTRON_RENDERER_URL;
+
+// Chromium (Electron 32.x) on macOS spams stderr with harmless
+// `eglQueryDeviceAttribEXT: Bad attribute` lines from gl_display.cc. Mute that
+// known noise without `disable-gpu` — the office floor needs WebGL. Raise the
+// Chromium log floor (3 = FATAL) and filter residual matching lines on stderr.
+app.commandLine.appendSwitch('log-level', '3');
+{
+  const noisyGpu = /eglQueryDeviceAttribEXT|ERROR:gl_display\.cc/;
+  const writeStderr = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((
+    chunk: string | Uint8Array,
+    encoding?: BufferEncoding | ((err?: Error | null) => void),
+    cb?: (err?: Error | null) => void
+  ): boolean => {
+    const text = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+    if (noisyGpu.test(text)) {
+      if (typeof encoding === 'function') encoding(null);
+      else if (typeof cb === 'function') cb(null);
+      return true;
+    }
+    return writeStderr(chunk as never, encoding as never, cb as never);
+  }) as typeof process.stderr.write;
+}
 
 // Keep the main process alive on an unexpected throw/rejection. The harness is a
 // multi-agent supervisor — a single stray throw (e.g. node-pty's ConPTY console
@@ -231,14 +289,18 @@ const ptyToAgent = new Map<string, string>();
  *  install disabled) so the freshly-installed CLI launches in the SAME pty/window —
  *  no user click. Cleared the moment it's consumed, so it can never loop installs. */
 const pendingInstallRelaunch = new Map<string, { opts: AgentSpawnOptions; owner: Electron.WebContents | null; bin: string; rung: string }>();
-const hive = new HiveManager(
+const emitToRenderer = (channel: string, payload: unknown): boolean => {
+  const wc = liveWebContents();
+  if (!wc) return false;
+  try { wc.send(channel, payload); return true; } catch { return false; }
+};
+/** Process-wide "current floor". Rebound to the active project's HiveManager. */
+let hive = new HiveManager(
   () => readConfig().harnessHome,
-  (channel, payload) => {
-    const wc = liveWebContents();
-    if (!wc) return false;
-    try { wc.send(channel, payload); return true; } catch { return false; }
-  }
+  emitToRenderer,
+  DEFAULT_PROJECT_ID
 );
+let hiveServicesStarted = false;
 // #7C — operator control state (pause/gate/steer/halt), read by the HookServer
 // when deciding hook returns.
 const control = new ControlRegistry();
@@ -275,7 +337,12 @@ let breakerBeatTimer: ReturnType<typeof setInterval> | null = null;
 telemetry.onApiError((agentId) => breaker.recordError(agentId));
 // Shared roster on disk — created early so HookServer can re-read standing goals
 // on every UserPromptSubmit (Edit Agent saves land here via persistAgents).
-const roster = new RosterStore(() => readConfig().harnessHome);
+const roster = new RosterStore(() => {
+  const home = readConfig().harnessHome;
+  if (!home) return null;
+  const id = projectRegistry.getActiveProjectId();
+  return id ? projectRootOf(home, id) : home;
+});
 function standingGoalFromRoster(agentId: string): string | null {
   const snap = roster.read();
   if (!snap || !Array.isArray(snap.agents)) return null;
@@ -292,19 +359,23 @@ function standingGoalFromRoster(agentId: string): string | null {
 // background window can't leave a worker parked on an unread inbox forever).
 // HookServer feeds it the hook stream so a permission/HITL prompt blocks nudges.
 const workerWake = new WorkerWakeWatchdog();
-// HookServer needs BOTH: Oscar's control registry (HITL pause/gate/steer/halt via
-// hook returns) AND Jim's breaker (feed recordToolUse on each PostToolUse).
-const hookServer = new HookServer(
-  hive,
+// One HookServer per hive so two floors can both have agent id `god`.
+const hookHub = new HookHub((h) => new HookServer(
+  h,
   () => liveWebContents(),
   () => readConfig(),
   control,
   breaker,
   standingGoalFromRoster,
   (agentId, event, message) => workerWake.noteHook(agentId, event, message)
-);
+));
 const memory = new MemoryManager(
-  () => readConfig().harnessHome,
+  () => {
+    const home = readConfig().harnessHome;
+    if (!home) return null;
+    const id = projectRegistry.getActiveProjectId();
+    return id ? projectRootOf(home, id) : home;
+  },
   () => { const c = readConfig(); return { enabled: c.semanticMemory !== false, model: c.embeddingModel ?? 'minilm' }; }
 );
 // Enterprise Knowledge Graph — file-backed store + agent CLI (default OFF).
@@ -325,7 +396,12 @@ function reflectSettings(): ReflectSettings {
 // Finishes the janitor's missing condense half: bounds each agent's memory.md
 // (Haiku tail-summary, backup→verify→atomic-swap) so it never grows unbounded.
 const reflector = new MemoryReflector(
-  () => readConfig().harnessHome,
+  () => {
+    const home = readConfig().harnessHome;
+    if (!home) return null;
+    const id = projectRegistry.getActiveProjectId();
+    return id ? projectRootOf(home, id) : home;
+  },
   () => readConfig().defaultCommand ?? 'claude',
   () => memory.env(),
   reflectSettings,
@@ -334,6 +410,234 @@ const reflector = new MemoryReflector(
 // Durable harness state (SQLite, main process). Phase A: window bounds (kv) +
 // net-new command history. Opened in whenReady, closed in the teardown blocks.
 const persist = new PersistStore();
+function bindActiveHive(next: HiveManager, _previousId: string | null): void {
+  hive = next;
+  hive.setRuntimeInfo({
+    version: app.isReady() ? app.getVersion() : '',
+    packaged: app.isPackaged,
+    appPath: app.getAppPath()
+  });
+  hive.setOrchestratorMaySpawn(readConfig().orchestratorMaySpawn === true);
+}
+const projectRegistry = new ProjectRegistry({
+  persist,
+  getHarnessHome: () => readConfig().harnessHome,
+  getMaxActiveAgents: () => resolveMaxActiveAgents(readConfig().maxActiveAgents),
+  pty: ptyManager,
+  emit: emitToRenderer,
+  onProjectReady: (h) => {
+    hookHub.ensure(h);
+    try { h.startRouter(); } catch { /* hive may not be on disk yet */ }
+  },
+  onProjectRemoved: (projectId) => hookHub.stop(projectId),
+  onActiveChanged: bindActiveHive
+});
+const RUNTIME_ID_KV = 'runtimeId';
+function runtimeId(): string {
+  const saved = persist.getKv<string>(RUNTIME_ID_KV);
+  if (typeof saved === 'string' && saved) return saved;
+  const id = randomUUID();
+  persist.setKv(RUNTIME_ID_KV, id);
+  return id;
+}
+const fileSeatStore = new FileSeatStore({
+  getHarnessHome: () => readConfig().harnessHome ?? null
+});
+const seatBoard = new SeatBoard({
+  store: fileSeatStore,
+  getRuntimeId: runtimeId,
+  hostLabel: () => {
+    try { return hostname(); } catch { return 'local'; }
+  },
+  getHubUrl: () => {
+    const url = readConfig().seatHubUrl?.trim();
+    return url || null;
+  },
+  getHubToken: () => readConfig().seatHubToken ?? ''
+});
+let seatHub: SeatHub | null = null;
+let seatHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
+let seatBeatCount = 0;
+let seatDrain: Promise<void> = Promise.resolve();
+function ensureSeatHubToken(): string {
+  const current = readConfig().seatHubToken;
+  if (typeof current === 'string' && current.length >= 16) return current;
+  const token = randomBytes(24).toString('hex');
+  writeConfig({ seatHubToken: token });
+  return token;
+}
+async function syncSeatHub(): Promise<{ ok: boolean; url?: string; error?: string; listening: boolean }> {
+  const cfg = readConfig();
+  const remote = cfg.seatHubUrl?.trim();
+  if (remote || !cfg.seatHubListen) {
+    if (seatHub) { try { seatHub.stop(); } catch { /* best-effort */ } seatHub = null; }
+    startSeatHeartbeat();
+    return { ok: true, listening: false };
+  }
+  ensureSeatHubToken();
+  if (seatHub) { try { seatHub.stop(); } catch { /* best-effort */ } seatHub = null; }
+  seatHub = new SeatHub({
+    port: cfg.seatHubPort && cfg.seatHubPort > 0 ? cfg.seatHubPort : DEFAULT_SEAT_HUB_PORT,
+    bind: (cfg.seatHubBind && cfg.seatHubBind.trim()) || '127.0.0.1',
+    token: () => readConfig().seatHubToken ?? '',
+    store: fileSeatStore
+  });
+  const started = await seatHub.start();
+  startSeatHeartbeat();
+  if (!started.ok) {
+    seatHub = null;
+    return { ok: false, error: started.error, listening: false };
+  }
+  console.log('[seathub] listening', started.url);
+  return { ok: true, url: started.url, listening: true };
+}
+function startSeatHeartbeat(): void {
+  if (seatHeartbeatTimer) return;
+  seatHeartbeatTimer = setInterval(() => { void beatHeldSeats(); }, SEAT_HEARTBEAT_MS);
+  void beatHeldSeats();
+}
+function stopSeatHeartbeat(): void {
+  if (seatHeartbeatTimer) clearInterval(seatHeartbeatTimer);
+  seatHeartbeatTimer = null;
+}
+async function beatHeldSeats(): Promise<void> {
+  seatBeatCount += 1;
+  const pushPack = seatBeatCount % 4 === 0;
+  for (const project of projectRegistry.listProjects()) {
+    let rows: Awaited<ReturnType<SeatBoard['list']>>;
+    try { rows = await seatBoard.list(project.projectId); } catch { continue; }
+    for (const row of rows) {
+      if (row.occupancy !== 'local') continue;
+      try { await seatBoard.heartbeat(project.projectId, row.agentId, { provider: row.provider }); } catch { /* next beat */ }
+      if (pushPack) {
+        try {
+          const pack = await collectHandoff(project.projectId, row.agentId);
+          if (pack) await seatBoard.putHandoff(project.projectId, row.agentId, pack);
+        } catch { /* best-effort */ }
+      }
+    }
+  }
+}
+async function drainSeats(): Promise<void> {
+  for (const project of projectRegistry.listProjects()) {
+    let rows: Awaited<ReturnType<SeatBoard['list']>>;
+    try { rows = await seatBoard.list(project.projectId); } catch { continue; }
+    for (const row of rows) {
+      if (row.occupancy !== 'local') continue;
+      try {
+        const pack = await collectHandoff(project.projectId, row.agentId);
+        if (pack) await seatBoard.putHandoff(project.projectId, row.agentId, pack);
+      } catch { /* still vacate */ }
+      try { await seatBoard.vacate(project.projectId, row.agentId); } catch { /* lease will expire */ }
+    }
+  }
+}
+async function gitSnapshot(cwd: string | undefined): Promise<SeatHandoff['git']> {
+  if (!cwd) return undefined;
+  try {
+    if (!(await isRepo(cwd))) return undefined;
+    const branch = await getBranch(cwd);
+    const status = await getStatus(cwd);
+    const log = await getLog(cwd, 1);
+    const dirty = !('error' in status)
+      && (status.staged.length + status.unstaged.length + status.untracked.length) > 0;
+    return {
+      branch: !('error' in branch) ? (branch.current ?? undefined) : undefined,
+      head: Array.isArray(log) && log[0] ? log[0].sha : undefined,
+      dirty
+    };
+  } catch {
+    return undefined;
+  }
+}
+async function collectHandoff(projectId: string, agentId: string): Promise<SeatHandoff | null> {
+  const h = resolveHive(projectRegistry, hive, projectId);
+  let identity = '';
+  try {
+    const root = h.root();
+    if (root) {
+      const p = join(root, 'agents', agentId, 'identity.md');
+      if (existsSync(p)) identity = readFileSync(p, 'utf8');
+    }
+  } catch { /* best-effort */ }
+  const meta = h.registry().agents[agentId];
+  const project = projectRegistry.getMeta(projectId);
+  const cwd = meta?.cwd;
+  let character: string | undefined;
+  try {
+    const home = readConfig().harnessHome;
+    if (home) {
+      const snap = new RosterStore(() => projectRootOf(home, projectId)).read();
+      const row = Array.isArray(snap?.agents)
+        ? snap.agents.find((raw) => (raw as { id?: string }).id === agentId) as { character?: string } | undefined
+        : undefined;
+      if (typeof row?.character === 'string') character = row.character;
+    }
+  } catch { /* optional */ }
+  return seatBoard.exportHandoff({
+    projectId,
+    projectName: project?.name,
+    agentId,
+    agentName: meta?.name,
+    role: meta?.role,
+    character,
+    provider: meta?.provider,
+    cwd,
+    sessionId: meta?.sessionId,
+    identity,
+    memory: h.memory(agentId),
+    inbox: h.inbox(agentId),
+    git: await gitSnapshot(cwd),
+    hiveRootPath: project?.hiveRootPath
+  });
+}
+function floorCatalogOf(projectId: string): FloorCatalog | null {
+  const meta = projectRegistry.getMeta(projectId);
+  const h = projectRegistry.getProject(projectId);
+  if (!meta || !h) return null;
+  const agents: FloorCatalog['agents'] = [];
+  let rosterChars: Record<string, string> = {};
+  try {
+    const home = readConfig().harnessHome;
+    if (home) {
+      const snap = new RosterStore(() => projectRootOf(home, projectId)).read();
+      if (Array.isArray(snap?.agents)) {
+        for (const raw of snap.agents) {
+          const a = raw as { id?: string; character?: string };
+          if (typeof a.id === 'string' && typeof a.character === 'string') rosterChars[a.id] = a.character;
+        }
+      }
+    }
+  } catch { /* optional */ }
+  try {
+    for (const [id, agent] of Object.entries(h.registry().agents)) {
+      if (agent.archived || agent.isAssistant) continue;
+      agents.push({
+        agentId: id,
+        name: agent.name,
+        role: agent.role,
+        character: rosterChars[id],
+        provider: agent.provider
+      });
+    }
+  } catch { /* empty catalog is still publishable */ }
+  return {
+    projectId,
+    name: meta.name,
+    godCharacter: meta.godCharacter,
+    defaultCwd: meta.defaultCwd,
+    agents,
+    updatedAt: Date.now()
+  };
+}
+async function publishFloor(projectId: string): Promise<void> {
+  const floor = floorCatalogOf(projectId);
+  if (floor) await seatBoard.putFloor(floor);
+}
+const builtinHost = new BuiltinAgentHost({
+  listHives: () => projectRegistry.listHives(),
+  occupancy: (projectId, agentId) => seatBoard.occupancy(projectId, agentId)
+});
 /** The PRIMARY window — the one running the hive/god orchestration and the sink
  *  for process-global timer events (missions, breaker, Slack ingestion). It is
  *  the most-recently-focused live window, so global events follow the user.
@@ -415,6 +719,33 @@ interface PreservedWorktree {
 const preservedWorktrees = new Map<string, PreservedWorktree>();
 
 /**
+ * Soft-release a live slot: kill the engine process but KEEP the hive agent on
+ * the floor (role / memory / session id / worktree stay). Used when a worker is
+ * idle with no queued work — pull them back up on the next task via --resume.
+ * Unlike teardownPty, this does NOT archive and does NOT delete the worktree.
+ */
+function parkPty(id: string): { ok: boolean; error?: string } {
+  const agentId = ptyToAgent.get(id) ?? parseAgentPtyId(id)?.agentId;
+  const res = ptyManager.kill(id);
+  if (!res.ok) return res;
+  if (agentId) {
+    ptyToAgent.delete(id);
+    try { workerWake.forget(agentId, id); } catch { /* best-effort */ }
+    try { breaker.forget(agentId); } catch { /* best-effort */ }
+    try { hive.stopProxyBridge(agentId); } catch { /* best-effort */ }
+    // Keep hive registry active (not archived) so the seat remains on the floor.
+    if (hive.enabled()) {
+      try { hive.setArchived(agentId, false); } catch { /* best-effort */ }
+    }
+  }
+  // Leave worktreePaths / sessionId in place for the next on-demand spawn.
+  try { integrationBroker.revoke(id); } catch { /* best-effort */ }
+  if (liveWorkers.has(id)) liveWorkers.delete(id);
+  syncKeepAwake();
+  return { ok: true };
+}
+
+/**
  * Tear down everything tied to a PTY id: archive its hive agent, remove its
  * isolated git worktree, and drop the bookkeeping-map entries. Runs on BOTH an
  * explicit `pty:kill` AND a natural PTY exit (the child finished, crashed, or
@@ -433,6 +764,12 @@ const preservedWorktrees = new Map<string, PreservedWorktree>();
  * handler or node-pty's onExit).
  */
 function teardownPty(id: string): void {
+  const parsedSeat = parseAgentPtyId(id);
+  const vacateAgent = parsedSeat?.agentId ?? ptyToAgent.get(id);
+  const vacateProject = parsedSeat?.projectId ?? projectRegistry.getActiveProjectId();
+  if (vacateAgent && vacateProject) {
+    try { void seatBoard.vacate(vacateProject, vacateAgent); } catch { /* best-effort */ }
+  }
   // Ephemeral-worker flag, read BEFORE the cleanup below deletes the entry. All
   // worker deaths (done-release, idle/token reap, manual stop, crash) funnel
   // through here, so this is the one place their floor card gets archived
@@ -862,28 +1199,29 @@ function syncContextTriggers(): void {
   }
 }
 
-/** Startup migration (#57/#58): archive every agent entry that is `archived:false`
- *  but has NO live PTY. This runs in bootstrapHiveServices, BEFORE the renderer can
- *  respawn anything, so at this point NO agent owns a PTY — every `archived:false`
- *  entry is therefore a stale carry-over from a prior session that quit/crashed
- *  WITHOUT archiving (e.g. the pre-acc13a3 'assistant' Dwight entry). Left as-is
- *  they have no live PTY, so the breaker beat steers them and the steer bounces to
- *  GOD as a requires_reply GOD can't clear → inbox flood.
+/** Startup hygiene (#57/#58): only archive leftover *assistant* shells.
  *
- *  "No live PTY" = ptyForAgent(id) === undefined (ptyToAgent is populated only at
- *  spawn and pruned on teardown). God is never archived. A user's real agents are
- *  unaffected: the "restore team" flow respawns them through ensureAgent, which
- *  re-clears `archived` — restorability does not depend on the archived flag. */
+ *  Historically this archived EVERY `archived:false` agent with no live PTY,
+ *  because at boot no PTYs exist yet. That was safe when "active" meant "has a
+ *  live engine". On-demand floors keep seats on the registry without a PTY
+ *  (idle = on floor; park releases the engine). Mass-archiving them on every
+ *  launch would wipe the cast.
+ *
+ *  The breaker already skips non-god agents without a live PTY, so leaving
+ *  on-floor seats `archived:false` no longer floods god's inbox. Assistants
+ *  are still archived — they are never floor seats.
+ */
 function archiveOrphanedAgents(): void {
   if (!hive.enabled()) return;
   try {
     const reg = hive.registry();
     for (const [id, a] of Object.entries(reg.agents)) {
       if (a.archived) continue;
-      if (id === reg.godId) continue;        // god is never archived
-      if (ptyForAgent(id)) continue;         // has a live PTY → genuinely active
-      hive.setArchived(id, true);            // stale archived:false orphan → archive
-      console.log('[migration] archived orphaned agent (no live PTY):', id);
+      if (id === reg.godId) continue;
+      if (!a.isAssistant) continue;
+      if (ptyForAgent(id)) continue;
+      hive.setArchived(id, true);
+      console.log('[migration] archived orphaned assistant (no live PTY):', id);
     }
   } catch (e) {
     console.error('[migration] archiveOrphanedAgents failed:', e);
@@ -1035,6 +1373,11 @@ function lastCoordinationAt(agentId: string): number {
 
 /** PTY id owning a given agent id, or undefined. */
 function ptyForAgent(agentId: string): string | undefined {
+  const projectId = projectRegistry.getActiveProjectId();
+  if (projectId) {
+    const tagged = `pty:${projectId}:${agentId}`;
+    if (ptyToAgent.has(tagged)) return tagged;
+  }
   for (const [ptyId, a] of ptyToAgent) if (a === agentId) return ptyId;
   return undefined;
 }
@@ -2534,7 +2877,7 @@ ipcMain.handle('pty:spawn', async (evt, opts: AgentSpawnOptions) => {
  *  it can ALSO be invoked by the god-triggered ephemeral-worker watcher (which has
  *  no renderer `evt`). `owner` is the window that should receive this PTY's output
  *  (null → the primary window). Behavior-identical to the prior inline handler. */
-async function spawnAgentCore(opts: AgentSpawnOptions, owner: Electron.WebContents | null): Promise<{ ok: boolean; error?: string; cwd?: string; worktreePath?: string; resumeNotFound?: boolean; resumed?: boolean; seedPrompt?: string }> {
+async function spawnAgentCore(opts: AgentSpawnOptions, owner: Electron.WebContents | null): Promise<{ ok: boolean; error?: string; cwd?: string; worktreePath?: string; resumeNotFound?: boolean; resumed?: boolean; seedPrompt?: string; builtin?: boolean; code?: string }> {
   // ── cwd INGESTION — expand `~` exactly once, here ───────────────────────────
   // This is the single door every agent spawn comes through (`pty:spawn` IPC and
   // the god-triggered ephemeral-worker watcher), so it is where a user-typed
@@ -2545,14 +2888,39 @@ async function spawnAgentCore(opts: AgentSpawnOptions, owner: Electron.WebConten
   // returned to the caller so the renderer records the same absolute path.
   opts.cwd = expandTilde(opts.cwd);
   if (opts.hive) opts.hive = { ...opts.hive, cwd: expandTilde(opts.hive.cwd) };
-  // Which CLI is this? Explicit wins; else inferred from the binary
-  // (claude/codex/grok/agy). Non-Claude providers skip every Claude-only spawn step
-  // below. Persist the resolved provider onto opts (+ hive meta) so the registry
-  // record and downstream provider-aware steps agree on one value.
+  opts.projectId = opts.projectId
+    || projectIdFromPayload(opts)
+    || projectRegistry.getActiveProjectId()
+    || DEFAULT_PROJECT_ID;
   const provider = inferAgentProvider(opts.command, opts.provider ?? opts.hive?.provider);
   const claudeProvider = isClaudeProvider(provider);
   opts.provider = provider;
   if (opts.hive) opts.hive = { ...opts.hive, provider };
+  const seatAgentId = opts.hive?.id || parseAgentPtyId(opts.id)?.agentId;
+  if (seatAgentId && opts.projectId && (await seatBoard.occupancy(opts.projectId, seatAgentId)) === 'remote') {
+    return { ok: false, error: 'this seat is claimed on another machine', code: 'SEAT_TAKEN' } as { ok: boolean; error?: string };
+  }
+  if (provider === 'builtin') {
+    if (!opts.noAutoInstall) analytics.track('agent_spawn_attempted', { provider });
+    const h = resolveHive(projectRegistry, hive, opts.projectId);
+    if (opts.hive) await h.ensureAgent({ ...opts.hive, provider: 'builtin' });
+    if (seatAgentId && opts.projectId) {
+      const claimed = await seatBoard.claim(opts.projectId, seatAgentId, { provider: 'builtin' });
+      if (!claimed.ok) {
+        return { ok: false, error: claimed.error, code: claimed.code } as { ok: boolean; error?: string };
+      }
+    }
+    void builtinHost.tick();
+    analytics.track('agent_spawned', { provider });
+    return { ok: true, cwd: opts.cwd, builtin: true };
+  }
+  // God must always be able to clock in. Auto-restore / live-slot fill can
+  // otherwise fill every concurrent slot before the orchestrator finishes.
+  const spawningGod = opts.hive?.isGod === true;
+  const liveCap = resolveMaxActiveAgents(readConfig().maxActiveAgents);
+  if (!spawningGod && ptyManager.getActivePtyCount() >= liveCap) {
+    return { ok: false, error: 'SPAWN_LIMIT_REACHED', code: 'SPAWN_LIMIT_REACHED' } as { ok: boolean; error?: string };
+  }
   // Activation-funnel entry (v0.4.6): every spawn REQUEST, so (attempted − spawned)
   // measures the fallout the whole rebuild exists to see. Gated on !noAutoInstall so
   // the missing-CLI relaunch (the only re-entry, index.ts install-exit handler) does
@@ -2683,9 +3051,10 @@ async function spawnAgentCore(opts: AgentSpawnOptions, owner: Electron.WebConten
   // seedDelivery:'type-into-tui') rather than passed on argv. Surfaced in the spawn
   // result so the renderer types it through the per-pty write-chain. (ondev-b)
   let seedPrompt: string | undefined;
-  if (opts.hive && hive.enabled()) {
+  const spawnHive = resolveHive(projectRegistry, hive, opts.projectId);
+  if (opts.hive && spawnHive.enabled()) {
     try {
-      const inj = await hive.ensureAgent(
+      const inj = await spawnHive.ensureAgent(
         { ...opts.hive, cwd: opts.cwd, provider },
         {
           semanticMemory: memory.active(),
@@ -2780,7 +3149,7 @@ async function spawnAgentCore(opts: AgentSpawnOptions, owner: Electron.WebConten
     // actually present (already or after the copy); otherwise fall back to a fresh
     // session rather than launching a `--resume` against a missing id.
     const explicitSid = typeof opts.resumeSessionId === 'string' ? opts.resumeSessionId.trim() : '';
-    const sid = explicitSid || (opts.resume === true ? hive.lastSession(opts.hive.id) : undefined);
+    const sid = explicitSid || (opts.resume === true ? spawnHive.lastSession(opts.hive.id) : undefined);
     if (sid && !args.includes('--resume')) {
       if (seedSessionTranscript(opts.cwd, sid)) {
         args.push('--resume', sid);
@@ -2813,7 +3182,7 @@ async function spawnAgentCore(opts: AgentSpawnOptions, owner: Electron.WebConten
     // resumeSessionId was read ONLY in the Claude branch, so a Codex agent
     // silently ignored it and started a brand-new empty session.
     const typedSid = typeof opts.resumeSessionId === 'string' ? opts.resumeSessionId.trim() : '';
-    const sid = typedSid || (opts.resume === true ? hive.lastSession(opts.hive.id) : undefined);
+    const sid = typedSid || (opts.resume === true ? spawnHive.lastSession(opts.hive.id) : undefined);
     if (sid && rf) {
       const args = opts.args ?? [];
       if (!args.includes(rf)) { args.push(rf, sid); opts.args = args; didResume = true; }
@@ -2933,6 +3302,9 @@ async function spawnAgentCore(opts: AgentSpawnOptions, owner: Electron.WebConten
   const res = ptyManager.spawn(opts, owner);
   if (res.ok) analytics.track('agent_spawned', { provider });
   else analytics.track('agent_spawn_failed', { provider, reason: spawnFailReason(res.error) });
+  if (res.ok && seatAgentId && opts.projectId) {
+    try { await seatBoard.claim(opts.projectId, seatAgentId, { provider }); } catch { /* best-effort */ }
+  }
   syncKeepAwake(); // arm the power-save blocker while ≥1 agent PTY is alive (#18)
   // Hand the resolved worktree path back to the renderer so it can persist it on
   // the agent (only set when isolation actually provisioned a worktree above).
@@ -2963,6 +3335,11 @@ ipcMain.handle('pty:kill', (_evt, id: string) => {
   const res = ptyManager.kill(id);
   teardownPty(id);
   return res;
+});
+/** Soft-release: kill the engine, keep the seat on the floor for later resume. */
+ipcMain.handle('pty:park', (_evt, id: string) => {
+  if (typeof id !== 'string') return { ok: false, error: 'invalid id' };
+  return parkPty(id);
 });
 ipcMain.handle('pty:list', () => ptyManager.list());
 
@@ -3135,12 +3512,20 @@ ipcMain.handle('config:update', (_evt, patch: Partial<HarnessConfig>) => {
   // the launch → first-agent funnel. `provider` is the engine chosen in the wizard.
   // Fired here (main), not in the renderer, so it rides the same allowlist as the rest.
   if (!wasOnboarded && next.onboardingComplete) {
-    analytics.track('onboarding_completed', { provider: next.godProvider ?? 'claude' });
+    analytics.track('onboarding_completed', { provider: next.godProvider ?? 'builtin' });
   }
   // Keep the hive's mirror of the spawn gate current. The queue itself reads
   // config per tick so it gates immediately; this is for the PROMPT, which is
   // built per spawn, so flipping the toggle reaches god the next time he starts.
   if (typeof patch?.orchestratorMaySpawn === 'boolean') hive.setOrchestratorMaySpawn(patch.orchestratorMaySpawn);
+  if (
+    patch && (
+      'seatHubUrl' in patch || 'seatHubToken' in patch || 'seatHubListen' in patch
+      || 'seatHubPort' in patch || 'seatHubBind' in patch
+    )
+  ) {
+    void syncSeatHub().catch((e) => console.error('[seathub] sync after config:', e));
+  }
   if (!hiveWasEnabled && hive.enabled()) {
     console.log('[hive] harnessHome configured — bootstrapping hive services');
     try { bootstrapHiveServices(); } catch (e) { console.error('[hive] bootstrap after onboarding:', e); }
@@ -3153,6 +3538,35 @@ ipcMain.handle('config:setAgentTokenCap', (_evt, agentId: unknown, tokenCap: unk
 ipcMain.handle('config:ensureHome', (_evt, path: unknown) => {
   if (typeof path !== 'string' || path.length === 0) return { ok: false, error: 'invalid path' };
   return ensureHarnessHome(path);
+});
+
+// ─── IPC: browser bridge + desktop control (Settings → Connections) ─────────
+ipcMain.handle('browserBridge:status', () => getBrowserBridgeStatus());
+ipcMain.handle('browserBridge:regenerateToken', () => {
+  const token = randomBytes(16).toString('hex');
+  writeConfig({ browserBridgeToken: token });
+  stopBrowserBridge();
+  startBrowserBridge();
+  return { token };
+});
+ipcMain.handle('desktopControl:permissionStatus', () => getDesktopPermissionStatus());
+ipcMain.handle('desktopControl:openAccessibilitySettings', async () => {
+  if (process.platform === 'darwin') {
+    await shell.openExternal(
+      'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'
+    );
+    return;
+  }
+  if (process.platform === 'win32') {
+    await shell.openExternal('ms-settings:privacy-accessibility');
+  }
+});
+ipcMain.handle('desktopControl:openScreenCaptureSettings', async () => {
+  if (process.platform === 'darwin') {
+    await shell.openExternal(
+      'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
+    );
+  }
 });
 
 // Change the harnessHome folder. Because every derived path (hive root, palace,
@@ -3194,7 +3608,7 @@ ipcMain.handle('config:changeHome', async (_evt, payload: unknown) => {
   try { stopEphemeralWorkerWatcher(); } catch (e) { console.error('[changeHome] stopWorkerWatcher:', e); }
   try { integrationBroker.stop(); } catch (e) { console.error('[changeHome] broker.stop:', e); }
   try { hive.stopRouter(); } catch (e) { console.error('[changeHome] stopRouter:', e); }
-  try { hookServer.stop(); } catch (e) { console.error('[changeHome] hookServer.stop:', e); }
+  try { hookHub.stopAll(); } catch (e) { console.error('[changeHome] hookHub.stop:', e); }
   try { stopSlackServer(); } catch (e) { console.error('[changeHome] slack.stop:', e); }
   try { stopWebhookServer(); } catch (e) { console.error('[changeHome] webhook.stop:', e); }
   try { memory.stop(); } catch (e) { console.error('[changeHome] memory.stop:', e); }
@@ -3206,7 +3620,7 @@ ipcMain.handle('config:changeHome', async (_evt, payload: unknown) => {
       // renderer's half of the same state, and leaving it behind would move the
       // agents' sessions and memory to the new home while their names, notes and
       // worktree paths stayed at the old one.
-      for (const sub of ['hive', 'palace', 'roster.json', 'roster-backups']) {
+      for (const sub of ['hive', 'palace', 'roster.json', 'roster-backups', 'projects', 'hive.pre-migrate', 'roster.pre-migrate.json']) {
         const src = join(oldHome, sub);
         if (!existsSync(src)) continue;
         // cpSync copies the whole tree incl. .git and is cross-device safe (unlike
@@ -3386,25 +3800,386 @@ ipcMain.on('config:homeSync', (evt) => { evt.returnValue = readConfig().harnessH
 ipcMain.handle('roster:read', () => roster.read());
 ipcMain.handle('roster:write', (_evt, snap: unknown) => roster.write(snap));
 
+ipcMain.handle('project:list', () => projectRegistry.listProjects());
+ipcMain.handle('project:getActive', () => ({
+  projectId: projectRegistry.getActiveProjectId(),
+  project: projectRegistry.getActiveProjectId()
+    ? projectRegistry.getMeta(projectRegistry.getActiveProjectId()!)
+    : undefined
+}));
+ipcMain.handle('project:create', async (_evt, payload: unknown) => {
+  const body = payload && typeof payload === 'object' ? payload as {
+    name?: unknown;
+    defaultCwd?: unknown;
+    roles?: unknown;
+  } : {};
+  if (typeof body.name !== 'string') {
+    return { ok: false, code: 'CREATE_FAILED', error: 'project name required' };
+  }
+  const roles = (Array.isArray(body.roles) ? body.roles : []) as CreateProjectRole[];
+  const res = await projectRegistry.createProject({
+    name: body.name,
+    defaultCwd: typeof body.defaultCwd === 'string' ? body.defaultCwd : undefined,
+    roles,
+    provider: resolveAgentProvider(readConfig().godProvider)
+  });
+  if (res.ok) {
+    try { bootstrapHiveServices(); } catch (e) { console.error('[project] bootstrap after create:', e); }
+    void publishFloor(res.project.projectId);
+    return { ...res, roster: roster.read() };
+  }
+  return res;
+});
+ipcMain.handle('project:activate', (_evt, projectId: unknown) => {
+  if (typeof projectId !== 'string' || !projectId) {
+    return { ok: false, code: 'PROJECT_NOT_FOUND', error: 'projectId required' };
+  }
+  const res = projectRegistry.activate(projectId);
+  if (res.ok) return { ...res, roster: roster.read() };
+  return res;
+});
+ipcMain.handle('project:delete', (_evt, projectId: unknown) => {
+  if (typeof projectId !== 'string' || !projectId) {
+    return { ok: false, code: 'PROJECT_NOT_FOUND', error: 'projectId required' };
+  }
+  const res = projectRegistry.deleteProject(projectId);
+  if (res.ok) {
+    return {
+      ...res,
+      activeProjectId: projectRegistry.getActiveProjectId(),
+      roster: roster.read()
+    };
+  }
+  return res;
+});
+
+ipcMain.handle('project:promote', (_evt, payload: unknown) => {
+  const body = payload && typeof payload === 'object' ? payload as { projectId?: unknown; agentId?: unknown } : {};
+  const projectId = typeof body.projectId === 'string' && body.projectId
+    ? body.projectId
+    : projectRegistry.getActiveProjectId();
+  if (!projectId || typeof body.agentId !== 'string' || !body.agentId) {
+    return { ok: false, code: 'PROJECT_NOT_FOUND', error: 'projectId and agentId required' };
+  }
+  const res = projectRegistry.promote(projectId, body.agentId);
+  if (res.ok) return { ...res, roster: roster.read() };
+  return res;
+});
+ipcMain.handle('project:spinOut', async (_evt, payload: unknown) => {
+  const body = payload && typeof payload === 'object' ? payload as {
+    sourceProjectId?: unknown; agentId?: unknown; name?: unknown;
+  } : {};
+  const sourceProjectId = typeof body.sourceProjectId === 'string' && body.sourceProjectId
+    ? body.sourceProjectId
+    : projectRegistry.getActiveProjectId();
+  if (!sourceProjectId || typeof body.agentId !== 'string' || !body.agentId) {
+    return { ok: false, code: 'PROJECT_NOT_FOUND', error: 'sourceProjectId and agentId required' };
+  }
+  const res = await projectRegistry.spinOut({
+    sourceProjectId,
+    agentId: body.agentId,
+    name: typeof body.name === 'string' ? body.name : undefined
+  });
+  if (res.ok) {
+    try { bootstrapHiveServices(); } catch (e) { console.error('[project] bootstrap after spin-out:', e); }
+    return { ...res, projects: projectRegistry.listProjects() };
+  }
+  return res;
+});
+ipcMain.handle('project:listTemplates', () =>
+  listProjectTemplates(readConfig().harnessHome ?? null));
+ipcMain.handle('project:saveTemplate', (_evt, payload: unknown) => {
+  const home = readConfig().harnessHome;
+  if (!home) return { ok: false, error: 'no harnessHome' };
+  const body = payload && typeof payload === 'object' ? payload as { name?: unknown; roles?: unknown; blurb?: unknown } : {};
+  if (typeof body.name !== 'string' || !Array.isArray(body.roles)) {
+    return { ok: false, error: 'name and roles required' };
+  }
+  return saveProjectTemplate(home, {
+    name: body.name,
+    roles: body.roles as CreateProjectRole[],
+    blurb: typeof body.blurb === 'string' ? body.blurb : undefined
+  });
+});
+ipcMain.handle('project:deleteTemplate', (_evt, id: unknown) => {
+  const home = readConfig().harnessHome;
+  if (!home) return { ok: false, error: 'no harnessHome' };
+  if (typeof id !== 'string' || !id) return { ok: false, error: 'id required' };
+  return deleteProjectTemplate(home, id);
+});
+
+ipcMain.handle('role:list', () => listRoles(readConfig().harnessHome ?? null));
+ipcMain.handle('role:save', (_evt, payload: unknown) => {
+  const home = readConfig().harnessHome;
+  if (!home) return { ok: false, error: 'no harnessHome' };
+  return saveRole(home, payload);
+});
+ipcMain.handle('role:delete', (_evt, id: unknown) => {
+  const home = readConfig().harnessHome;
+  if (!home) return { ok: false, error: 'no harnessHome' };
+  if (typeof id !== 'string' || !id) return { ok: false, error: 'id required' };
+  return deleteRole(home, id);
+});
+ipcMain.handle('role:proposeFromBrief', async (_evt, payload: unknown) => {
+  const body = payload && typeof payload === 'object' ? payload as { brief?: unknown; cwd?: unknown } : {};
+  const brief = typeof body.brief === 'string' ? body.brief : '';
+  const cwd = typeof body.cwd === 'string' ? body.cwd : undefined;
+  return proposeRoleFromBrief(brief, cwd);
+});
+ipcMain.handle('seat:list', (_evt, projectId: unknown) => {
+  const id = typeof projectId === 'string' && projectId
+    ? projectId
+    : projectRegistry.getActiveProjectId();
+  if (!id) return [];
+  return seatBoard.list(id);
+});
+ipcMain.handle('seat:claim', (_evt, payload: unknown) => {
+  const body = payload && typeof payload === 'object' ? payload as {
+    projectId?: unknown; agentId?: unknown; force?: unknown; provider?: unknown;
+  } : {};
+  const projectId = typeof body.projectId === 'string' && body.projectId
+    ? body.projectId
+    : projectRegistry.getActiveProjectId();
+  if (!projectId || typeof body.agentId !== 'string') {
+    return { ok: false, code: 'PROJECT_NOT_FOUND', error: 'projectId and agentId required' };
+  }
+  return seatBoard.claim(projectId, body.agentId, {
+    force: body.force === true,
+    provider: typeof body.provider === 'string' ? body.provider : undefined
+  });
+});
+ipcMain.handle('seat:vacate', async (_evt, payload: unknown) => {
+  const body = payload && typeof payload === 'object' ? payload as {
+    projectId?: unknown; agentId?: unknown; force?: unknown;
+  } : {};
+  const projectId = typeof body.projectId === 'string' && body.projectId
+    ? body.projectId
+    : projectRegistry.getActiveProjectId();
+  if (!projectId || typeof body.agentId !== 'string') {
+    return { ok: false, code: 'PROJECT_NOT_FOUND', error: 'projectId and agentId required' };
+  }
+  if (body.force !== true) {
+    try {
+      const pack = await collectHandoff(projectId, body.agentId);
+      if (pack) await seatBoard.putHandoff(projectId, body.agentId, pack);
+    } catch { /* still vacate */ }
+  }
+  return seatBoard.vacate(projectId, body.agentId, { force: body.force === true });
+});
+ipcMain.handle('seat:exportHandoff', async (_evt, payload: unknown) => {
+  const body = payload && typeof payload === 'object' ? payload as {
+    projectId?: unknown; agentId?: unknown;
+  } : {};
+  const projectId = typeof body.projectId === 'string' && body.projectId
+    ? body.projectId
+    : projectRegistry.getActiveProjectId();
+  if (!projectId || typeof body.agentId !== 'string') {
+    return { ok: false, error: 'projectId and agentId required' };
+  }
+  const pack = await collectHandoff(projectId, body.agentId);
+  if (!pack) return { ok: false, error: 'could not export handoff' };
+  try { await seatBoard.putHandoff(projectId, body.agentId, pack); } catch { /* clipboard still works */ }
+  return { ok: true, handoff: pack };
+});
+ipcMain.handle('seat:listFloors', () => seatBoard.listFloors());
+ipcMain.handle('seat:importFloor', async (_evt, payload: unknown) => {
+  const body = payload && typeof payload === 'object' ? payload as { projectId?: unknown } : {};
+  if (typeof body.projectId !== 'string' || !body.projectId) {
+    return { ok: false, code: 'PROJECT_NOT_FOUND', error: 'projectId required' };
+  }
+  const floor = await seatBoard.getFloor(body.projectId);
+  if (!floor) return { ok: false, code: 'PROJECT_NOT_FOUND', error: 'floor not on hub' };
+  if (!isOfficeCharacter(floor.godCharacter)) {
+    return { ok: false, code: 'GOD_REQUIRED', error: 'floor catalog has no office god' };
+  }
+  const imported = await projectRegistry.importProject({
+    projectId: floor.projectId,
+    name: floor.name,
+    godCharacter: floor.godCharacter as OfficeCharacterName,
+    defaultCwd: floor.defaultCwd,
+    agents: floor.agents
+  });
+  if (imported.ok) {
+    try { bootstrapHiveServices(); } catch (e) { console.error('[seathub] bootstrap after import:', e); }
+    return { ...imported, roster: roster.read(), projects: projectRegistry.listProjects() };
+  }
+  return imported;
+});
+ipcMain.handle('seat:hubStatus', () => {
+  const cfg = readConfig();
+  return {
+    listen: cfg.seatHubListen === true,
+    listening: Boolean(seatHub?.address()),
+    url: seatHub?.address() ?? null,
+    hubUrl: cfg.seatHubUrl ?? '',
+    tokenSet: Boolean(cfg.seatHubToken),
+    port: cfg.seatHubPort ?? DEFAULT_SEAT_HUB_PORT,
+    bind: cfg.seatHubBind ?? '127.0.0.1'
+  };
+});
+ipcMain.handle('seat:hubStart', async () => {
+  writeConfig({ seatHubListen: true });
+  ensureSeatHubToken();
+  return syncSeatHub();
+});
+ipcMain.handle('seat:hubStop', async () => {
+  writeConfig({ seatHubListen: false });
+  return syncSeatHub();
+});
+ipcMain.handle('seat:takeOver', async (evt, payload: unknown) => {
+  const body = payload && typeof payload === 'object' ? payload as {
+    projectId?: unknown; agentId?: unknown; force?: unknown; spawn?: unknown; cwd?: unknown; provider?: unknown;
+  } : {};
+  const projectId = typeof body.projectId === 'string' && body.projectId
+    ? body.projectId
+    : projectRegistry.getActiveProjectId();
+  if (!projectId || typeof body.agentId !== 'string') {
+    return { ok: false, code: 'PROJECT_NOT_FOUND', error: 'projectId and agentId required' };
+  }
+  const agentId = body.agentId;
+  if (!projectRegistry.getMeta(projectId)) {
+    const floor = await seatBoard.getFloor(projectId);
+    if (floor && isOfficeCharacter(floor.godCharacter)) {
+      const imported = await projectRegistry.importProject({
+        projectId: floor.projectId,
+        name: floor.name,
+        godCharacter: floor.godCharacter,
+        defaultCwd: floor.defaultCwd,
+        agents: floor.agents
+      });
+      if (!imported.ok) return imported;
+      try { bootstrapHiveServices(); } catch { /* continue */ }
+    }
+  }
+  const pack = await seatBoard.getHandoff(projectId, agentId);
+  const claimed = await seatBoard.claim(projectId, agentId, {
+    force: body.force === true,
+    provider: typeof body.provider === 'string'
+      ? body.provider
+      : (pack?.provider)
+  });
+  if (!claimed.ok) return claimed;
+  const h = resolveHive(projectRegistry, hive, projectId);
+  const project = projectRegistry.getMeta(projectId);
+  const requestedCwd = typeof body.cwd === 'string' ? expandTilde(body.cwd) : '';
+  const packCwd = pack?.cwd ? expandTilde(pack.cwd) : '';
+  const fallbackCwd = project?.defaultCwd
+    ? expandTilde(project.defaultCwd)
+    : (readConfig().harnessHome ? projectRootOf(readConfig().harnessHome!, projectId) : '');
+  const cwdExists = (p: string) => Boolean(p) && existsSync(p);
+  const cwd = cwdExists(requestedCwd) ? requestedCwd
+    : cwdExists(packCwd) ? packCwd
+    : fallbackCwd;
+  const cwdMissing = Boolean(packCwd) && !cwdExists(packCwd) && cwd !== packCwd;
+  const provider = (typeof body.provider === 'string' ? body.provider : pack?.provider || 'claude') as AgentProvider;
+  try {
+    await h.ensureAgent({
+      id: agentId,
+      name: pack?.agentName || agentId,
+      cwd: cwd || fallbackCwd,
+      role: pack?.role,
+      provider
+    });
+    if (pack) {
+      h.applyHandoffPack(agentId, {
+        identity: pack.identity,
+        memory: pack.memory,
+        inbox: pack.inbox
+      });
+    }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+  void publishFloor(projectId);
+  const shouldSpawn = body.spawn !== false;
+  if (!shouldSpawn) {
+    return { ok: true, occupancy: claimed.occupancy, handoff: pack, cwd, cwdMissing, spawned: false };
+  }
+  const commandLine = pack?.command || defaultCommandForProvider(provider, readConfig().defaultCommand);
+  const parts = commandLine.trim().split(/\s+/).filter(Boolean);
+  const exe = provider === 'builtin' ? 'builtin' : (parts[0] || 'claude');
+  const args = provider === 'builtin' ? [] : parts.slice(1);
+  const ptyId = `pty:${projectId}:${agentId}`;
+  const owner = BrowserWindow.fromWebContents(evt.sender)?.webContents ?? null;
+  const spawned = await spawnAgentCore({
+    id: ptyId,
+    cwd: cwd || fallbackCwd || homedir(),
+    command: exe,
+    args,
+    cols: 100,
+    rows: 30,
+    projectId,
+    provider,
+    hive: {
+      id: agentId,
+      name: pack?.agentName || agentId,
+      cwd: cwd || fallbackCwd || homedir(),
+      role: pack?.role,
+      provider
+    }
+  }, owner);
+  if (!spawned.ok) {
+    return {
+      ok: false,
+      code: spawned.code,
+      error: spawned.error || 'spawn failed',
+      occupancy: claimed.occupancy,
+      cwd,
+      cwdMissing
+    };
+  }
+  return {
+    ok: true,
+    occupancy: claimed.occupancy,
+    handoff: pack,
+    cwd: spawned.cwd || cwd,
+    cwdMissing,
+    spawned: true,
+    builtin: spawned.builtin === true,
+    ptyId: spawned.builtin ? undefined : ptyId,
+    provider,
+    agentName: pack?.agentName || agentId,
+    role: pack?.role,
+    character: pack?.character,
+    syncNote: pack?.syncNote
+  };
+});
+
 // ─── IPC: hive (multi-agent coordination) ───────────────────────────────────
-ipcMain.handle('hive:registry', () => hive.registry());
-ipcMain.handle('hive:renameAgent', (_evt, id: unknown, name: unknown) => {
+function hiveIPC(projectId?: unknown): HiveManager {
+  return resolveHive(projectRegistry, hive, projectId);
+}
+ipcMain.handle('hive:registry', (_evt, projectId?: unknown) => hiveIPC(projectId).registry());
+ipcMain.handle('hive:renameAgent', (_evt, id: unknown, name: unknown, projectId?: unknown) => {
   if (typeof id !== 'string' || typeof name !== 'string') {
     return { ok: false, error: 'Invalid rename request' };
   }
-  return hive.renameAgent(id, name);
+  return hiveIPC(projectId).renameAgent(id, name);
 });
-ipcMain.handle('hive:setAgentHold', (_evt, id: unknown, hold: unknown) => {
+ipcMain.handle('hive:setAgentHold', (_evt, id: unknown, hold: unknown, projectId?: unknown) => {
   if (typeof id !== 'string' || typeof hold !== 'boolean') {
     return { ok: false, error: 'Invalid hold request' };
   }
-  return hive.setAgentHold(id, hold);
+  return hiveIPC(projectId).setAgentHold(id, hold);
 });
-ipcMain.handle('hive:board', () => hive.board());
-ipcMain.handle('hive:tasks', () => hive.tasks());
-ipcMain.handle('hive:log', (_evt, n: unknown) => hive.logTail(typeof n === 'number' ? n : 200));
-ipcMain.handle('hive:memory', (_evt, id: unknown) => (typeof id === 'string' ? hive.memory(id) : ''));
-ipcMain.handle('hive:inbox', (_evt, id: unknown) => (typeof id === 'string' ? hive.inbox(id) : []));
+ipcMain.handle('hive:board', (_evt, projectId?: unknown) => hiveIPC(projectId).board());
+ipcMain.handle('hive:tasks', (_evt, projectId?: unknown) => hiveIPC(projectId).tasks());
+ipcMain.handle('hive:log', (_evt, n: unknown, projectId?: unknown) =>
+  hiveIPC(projectId).logTail(typeof n === 'number' ? n : 200));
+ipcMain.handle('hive:runFlowList', (_evt, projectId?: unknown) => hiveIPC(projectId).runFlowList());
+ipcMain.handle('hive:runFlowDefaultView', (_evt, projectId?: unknown) =>
+  hiveIPC(projectId).runFlowDefaultView());
+ipcMain.handle('hive:runFlowGet', (_evt, id: unknown, projectId?: unknown) =>
+  (typeof id === 'string' ? hiveIPC(projectId).runFlowGet(id) : null));
+ipcMain.handle('hive:runFlowRetry', (_evt, id: unknown, projectId?: unknown) => {
+  if (typeof id !== 'string' || !id) return { ok: false, error: 'invalid' };
+  if (!hiveIPC(projectId).enabled()) return { ok: false, error: 'hive disabled' };
+  return hiveIPC(projectId).runFlowRetry(id);
+});
+ipcMain.handle('hive:memory', (_evt, id: unknown, projectId?: unknown) =>
+  (typeof id === 'string' ? hiveIPC(projectId).memory(id) : ''));
+ipcMain.handle('hive:inbox', (_evt, id: unknown, projectId?: unknown) =>
+  (typeof id === 'string' ? hiveIPC(projectId).inbox(id) : []));
 // Voice read-layer: recent message CONTENT (inbox/outbox bodies), REDACTED
 // main-side by hive.voiceMessages(). The renderer/voice layer never sees a raw
 // body — secrets are stripped here, before the result crosses IPC.
@@ -3412,9 +4187,10 @@ ipcMain.handle('hive:messages', (_evt, opts: unknown) =>
   hive.voiceMessages(opts && typeof opts === 'object' ? (opts as Parameters<typeof hive.voiceMessages>[0]) : {})
 );
 ipcMain.handle('hive:send', (_evt, partial: Partial<HiveMessage>, from: unknown) => {
-  if (!hive.enabled()) return { ok: false, error: 'hive disabled (no harnessHome)' };
+  const h = hiveIPC();
+  if (!h.enabled()) return { ok: false, error: 'hive disabled (no harnessHome)' };
   const sender = typeof from === 'string' ? from : 'system';
-  const msg = hive.send(partial ?? {}, sender);
+  const msg = h.send(partial ?? {}, sender);
   // Count only what a PERSON sent. Every renderer surface that dispatches on a
   // human's behalf passes 'human' (Command Center dispatch, thread replies, ASK
   // ME answers); agent-to-agent traffic passes the agent id and would swamp the
@@ -3453,6 +4229,16 @@ ipcMain.handle('hive:patchAgentRole', (_evt, id: unknown, role: unknown) => {
   if (typeof role !== 'string') return { ok: false, error: 'invalid role' };
   if (!hive.enabled()) return { ok: false, error: 'hive disabled (no harnessHome)' };
   return hive.patchAgentRole(id, role);
+});
+ipcMain.handle('hive:patchAgentTools', (_evt, id: unknown, patch: unknown) => {
+  if (typeof id !== 'string') return { ok: false, error: 'invalid id' };
+  if (!patch || typeof patch !== 'object') return { ok: false, error: 'invalid patch' };
+  if (!hive.enabled()) return { ok: false, error: 'hive disabled (no harnessHome)' };
+  const body = patch as { skills?: unknown; mcp?: unknown };
+  return hive.patchAgentTools(id, {
+    ...('skills' in body ? { skills: body.skills === null ? null : parseSeatAllowlist(body.skills) ?? [] } : {}),
+    ...('mcp' in body ? { mcp: body.mcp === null ? null : parseSeatAllowlist(body.mcp) ?? [] } : {})
+  });
 });
 
 // ─── IPC: Settings hero payload (remote data, cached) ───────────────────────
@@ -3686,12 +4472,18 @@ function teardownAndQuit(): void {
   try { stopEphemeralWorkerWatcher(); } catch (e) { console.error('[quit] stopWorkerWatcher:', e); }
   try { integrationBroker.stop(); } catch (e) { console.error('[quit] broker.stop:', e); }
   try { hive.stopRouter(); } catch (e) { console.error('[quit] stopRouter:', e); }
-  try { hookServer.stop(); } catch (e) { console.error('[quit] hookServer.stop:', e); }
+  try { hookHub.stopAll(); } catch (e) { console.error('[quit] hookHub.stop:', e); }
   try { telemetry.stop(); } catch (e) { console.error('[quit] telemetry.stop:', e); }
   try { stopSlackServer(); } catch (e) { console.error('[quit] slack.stop:', e); }
   try { stopWebhookServer(); } catch (e) { console.error('[quit] webhook.stop:', e); }
+  try { stopAutomationBridge(); } catch (e) { console.error('[quit] automationBridge.stop:', e); }
+  try { stopBrowserBridge(); } catch (e) { console.error('[quit] browserBridge.stop:', e); }
   try { memory.stop(); } catch (e) { console.error('[quit] memory.stop:', e); }
   try { reflector.stop(); } catch (e) { console.error('[quit] reflector.stop:', e); }
+  try { stopSeatHeartbeat(); } catch (e) { console.error('[quit] seat heartbeat:', e); }
+  try { seatDrain = drainSeats(); } catch (e) { console.error('[quit] drainSeats:', e); }
+  try { seatHub?.stop(); seatHub = null; } catch (e) { console.error('[quit] seathub.stop:', e); }
+  try { builtinHost.stop(); } catch (e) { console.error('[quit] builtinHost.stop:', e); }
   try { persist.close(); } catch (e) { console.error('[quit] persist.close:', e); }
   try { hive.stopAllProxyBridges(); } catch (e) { console.error('[quit] stopAllProxyBridges:', e); }
   try { ptyManager.killAll(); } catch (e) { console.error('[quit] killAll:', e); }
@@ -3747,7 +4539,7 @@ ipcMain.handle('app:resetAll', () => {
   try { stopEphemeralWorkerWatcher(); } catch (e) { console.error('[reset] stopWorkerWatcher:', e); }
   try { integrationBroker.stop(); } catch (e) { console.error('[reset] broker.stop:', e); }
   try { hive.stopRouter(); } catch (e) { console.error('[reset] stopRouter:', e); }
-  try { hookServer.stop(); } catch (e) { console.error('[reset] hookServer.stop:', e); }
+  try { hookHub.stopAll(); } catch (e) { console.error('[reset] hookHub.stop:', e); }
   try { telemetry.stop(); } catch (e) { console.error('[reset] telemetry.stop:', e); }
   try { stopSlackServer(); } catch (e) { console.error('[reset] slack.stop:', e); }
   try { memory.stop(); } catch (e) { console.error('[reset] memory.stop:', e); }
@@ -3788,7 +4580,7 @@ ipcMain.handle('hive:agentUsage', (_evt, cwd: unknown) =>
 // (re)started session zeroes the gauge instead of leaving a stale value up.
 ipcMain.handle('hive:agentContext', (_evt, agentId: unknown) => {
   if (typeof agentId !== 'string') return null;
-  const tp = hookServer.transcriptPath(agentId);
+  const tp = hookHub.transcriptPath(agentId, projectRegistry.getActiveProjectId());
   if (!tp) return null;
   return readContextTokens(tp) ?? 0;
 });
@@ -3812,7 +4604,7 @@ ipcMain.handle('hive:agentDirectory', () => {
     const u = usageById.get(id);
     const spans = snap.spans[id] ?? [];
     const tokens = u ? u.input + u.output + u.cacheRead + u.cacheCreation : 0;
-    const ctx = hookServer.contextFor(id);
+    const ctx = hookHub.contextFor(id, projectRegistry.getActiveProjectId());
     return {
       id,
       name: a.name,
@@ -4278,34 +5070,62 @@ function upsertLegacyWebhookTrigger(patch: { secret?: string; enabled?: boolean 
 // (CGEventTap) is deferred; hold-Option is the human-chosen v1 activation.
 
 ipcMain.handle('freeflow:setConfig', (_evt, patch: unknown) => {
-  const p = (patch ?? {}) as { enabled?: unknown; apiKey?: unknown; model?: unknown };
+  const p = (patch ?? {}) as { enabled?: unknown; apiKey?: unknown; model?: unknown; provider?: unknown };
   const next: Partial<HarnessConfig> = {};
   if (typeof p.enabled === 'boolean') next.freeflowEnabled = p.enabled;
   // Trim string fields; an emptied key clears back to undefined.
   if (typeof p.apiKey === 'string') next.groqApiKey = p.apiKey.trim() || undefined;
-  if (typeof p.model === 'string') next.freeflowModel = p.model.trim() || DEFAULT_GROQ_MODEL;
+  if (isSttProviderId(p.provider)) next.freeflowProvider = p.provider;
+  const stt = resolveSttProvider(typeof p.provider === 'string' ? p.provider : undefined);
+  if (typeof p.model === 'string') next.freeflowModel = p.model.trim() || stt.defaultModel;
   writeConfig(next);
   return { ok: true };
 });
 
-/** Transcribe one captured audio clip via Groq. Gated on the flag + a key being
- *  present, so a disabled feature can NEVER reach the network. The Groq key stays
- *  in main — only the audio bytes cross IPC inbound and the transcript outbound. */
+/** Whether CXB_ASR_TOKEN is set in main's environment (never returns the token). */
+ipcMain.handle('freeflow:ctripTokenPresent', () => {
+  loadCxbAsrTokenFromEnvFile(join(process.cwd(), '.env.local'));
+  return { present: !!readCxbAsrToken() };
+});
+
+/** Transcribe one captured audio clip via the selected STT host. Gated on the
+ *  flag + a key being present, so a disabled feature can NEVER reach the network.
+ *  The key stays in main — only the audio bytes cross IPC inbound and the
+ *  transcript outbound. */
 ipcMain.handle('freeflow:transcribe', async (_evt, arg: unknown) => {
   const cfg = readConfig();
   if (!cfg.freeflowEnabled) return { ok: false, error: 'Free Flow is disabled' };
-  if (!cfg.groqApiKey) return { ok: false, error: 'no Groq API key set' };
   const a = (arg ?? {}) as { audio?: unknown; mimeType?: unknown; filename?: unknown; language?: unknown };
   if (!(a.audio instanceof ArrayBuffer) && !(a.audio instanceof Uint8Array)) {
     return { ok: false, error: 'no audio' };
   }
+  const stt = resolveSttProvider(cfg.freeflowProvider);
+  const language = typeof a.language === 'string' && a.language ? a.language : undefined;
+  const mimeType = typeof a.mimeType === 'string' ? a.mimeType : undefined;
+
+  if (stt.id === 'ctrip') {
+    loadCxbAsrTokenFromEnvFile(join(process.cwd(), '.env.local'));
+    const token = readCxbAsrToken();
+    if (!token) return { ok: false, error: 'set CXB_ASR_TOKEN environment variable' };
+    const out = await transcribeWithCtrip({
+      apiKey: token,
+      audio: a.audio,
+      mimeType,
+      language
+    });
+    if (out.ok) analytics.trackFeature('voice_dictation');
+    return out;
+  }
+
+  if (!cfg.groqApiKey) return { ok: false, error: 'no STT API key set' };
   const out = await transcribeWithGroq({
     apiKey: cfg.groqApiKey,
     audio: a.audio,
-    mimeType: typeof a.mimeType === 'string' ? a.mimeType : undefined,
+    mimeType,
     filename: typeof a.filename === 'string' ? a.filename : undefined,
-    model: cfg.freeflowModel || DEFAULT_GROQ_MODEL,
-    language: typeof a.language === 'string' && a.language ? a.language : undefined
+    model: cfg.freeflowModel || stt.defaultModel,
+    endpoint: stt.endpoint,
+    language
   });
   if (out.ok) analytics.trackFeature('voice_dictation');
   return out;
@@ -4395,6 +5215,19 @@ registerRealtimeActionIpc({
       } catch { /* window torn down */ }
     }
     return res;
+  },
+  saveRoleDraft: (draft) => {
+    const home = readConfig().harnessHome;
+    if (!home) return { ok: false, error: 'no harnessHome' };
+    const saved = saveRole(home, { ...draft, source: draft.source || 'ai-god' });
+    if (!saved.ok) return saved;
+    return { ok: true, roleId: saved.role.id };
+  },
+  findRoleTitle: (title) => {
+    const hit = listRoles(readConfig().harnessHome ?? null).find(
+      (r) => r.title.trim().toLowerCase() === title.trim().toLowerCase()
+    );
+    return hit ? { id: hit.id, title: hit.title } : null;
   },
   listMissions: () => readConfig().missions ?? [],
   // The spec carries lastFiredAt through from listMissions(), so a wholesale write
@@ -4951,63 +5784,59 @@ ipcMain.handle('workers:stop', (_evt, workerId: string): { ok: boolean; error?: 
  *  Called on boot, and again to recover in place if a folder-change copy fails
  *  (config:changeHome tears these down before copying). No-op without a home. */
 function bootstrapHiveServices(): void {
-  if (!hive.enabled()) return;
-  hive.ensureHive();
-  // Tell the hive what it is running inside, BEFORE anything spawns: the prompt
-  // builder reads this, so an agent spawned earlier would never learn it.
-  hive.setRuntimeInfo({ version: app.getVersion(), packaged: app.isPackaged, appPath: app.getAppPath() });
-  hive.setOrchestratorMaySpawn(readConfig().orchestratorMaySpawn === true);
-  // An app-start marker in the event log. log.jsonl had twelve event kinds and
-  // none of them meant "the app restarted", so a relaunch, and more importantly a
-  // switch between a packaged build and a local one, was invisible to every agent
-  // reading the feed. That gap cost a multi-hour investigation whose answer was
-  // exactly this: a local build inherits the launching shell's umask, a
-  // Finder-launched app does not.
-  hive.appendLog({
-    kind: 'app-start',
-    version: app.getVersion(),
-    packaged: app.isPackaged,
-    // WHICH bundle, not just which version. Version plus packaged is not enough
-    // to tell two builds apart: a stale copy in /Applications and a fresh one in
-    // dist/ can report the same version and both be packaged, and picking the
-    // wrong one by habit looks exactly like the new build being broken. Cost us
-    // twice before this line existed.
-    appPath: app.getAppPath(),
-    exePath: process.execPath,
-    electron: process.versions.electron,
-    platform: process.platform
-  });
+  const home = readConfig().harnessHome;
+  if (!home) return;
+  projectRegistry.bootstrap();
+  const next = projectRegistry.activeHive();
+  if (next) {
+    hive = next;
+    hive.ensureHive();
+    hive.setRuntimeInfo({ version: app.getVersion(), packaged: app.isPackaged, appPath: app.getAppPath() });
+    hive.setOrchestratorMaySpawn(readConfig().orchestratorMaySpawn === true);
+    hive.appendLog({
+      kind: 'app-start',
+      version: app.getVersion(),
+      packaged: app.isPackaged,
+      appPath: app.getAppPath(),
+      exePath: process.execPath,
+      electron: process.versions.electron,
+      platform: process.platform
+    });
+    for (const h of projectRegistry.listHives()) {
+      hookHub.ensure(h);
+      try { h.startRouter(); } catch { /* per-hive */ }
+    }
+  } else if (!hiveServicesStarted) {
+    // No project yet — wait for project:create (must pick a god).
+    return;
+  }
+
+  if (hiveServicesStarted) return;
+  if (!projectRegistry.activeHive()) return;
+
   control.replaceAutoDeliveryPauses(readConfig().autoDeliveryPausedAgents ?? []);
-  archiveOrphanedAgents(); // #57/#58: archive stale archived:false entries with no live PTY
-  hive.startRouter();
-  startEphemeralWorkerWatcher(); // poll HIVE_ROOT/spawn-requests → ephemeral workers
-  // Phase 2: the loopback secret broker. Bind it BEFORE workers spawn so each spawn can
-  // be granted a capability token + the broker URL in its env. Loopback-only, idempotent.
+  archiveOrphanedAgents();
+  startEphemeralWorkerWatcher();
   void integrationBroker.start().then((r) => {
     if (r.ok) console.log('[broker] integration broker listening on', integrationBroker.url());
     else console.error('[broker] failed to start:', r.error);
   });
-  ensureDefaultMissions(); // one-time: seed the built-in hourly ops standup
-  syncMissions(); // arm recurring auto-dispatch missions now the router is live
-  syncContextTriggers(); // …and the context trigger's own compact/clear cadences
-  // Pair replies to inbound webhook messages in the ledger. Tied to the FEATURE
-  // (any endpoint configured), not to the server: an approved message's card can
-  // finish long after the operator switched the public surface back off, and its
-  // reply still belongs in the history.
+  ensureDefaultMissions();
+  syncMissions();
+  syncContextTriggers();
   if ((readConfig().webhookTriggers ?? []).length > 0) startWebhookDoneObserver();
-  hookServer.start();
-  // Bind the telemetry collector BEFORE the renderer spawns any agent, then point
-  // the hive at it so every subsequent spawn is instrumented. Best-effort — a bind
-  // failure just leaves telemetry off (transcript reconciler stays). No breaker.start():
-  // the breaker is POLICY-only, ticked by the heartbeat beat (#1, ships disabled).
   void telemetry.start().then((r) => {
-    if (r.ok && r.endpoint) { hive.setOtelEndpoint(r.endpoint); console.log('[telemetry] collector listening', r.endpoint); }
-    else console.error('[telemetry] collector failed to start:', r.error);
+    if (r.ok && r.endpoint) {
+      for (const h of projectRegistry.listHives()) h.setOtelEndpoint(r.endpoint);
+      console.log('[telemetry] collector listening', r.endpoint);
+    } else console.error('[telemetry] collector failed to start:', r.error);
   });
-  memory.start(); // init shared palace + mine loop (no-op without mempalace)
-  reflector.start(); // bound oversized memory.md files on a timer (no-op until threshold)
-
+  memory.start();
+  reflector.start();
   armAlwaysOnBeats();
+  builtinHost.start();
+  void syncSeatHub().catch((e) => console.error('[seathub] auto-start:', e));
+  hiveServicesStarted = true;
 }
 
 /** Cadence of the worker inbox-wake watchdog (#151). Well under the renderer's
@@ -5183,6 +6012,18 @@ app.whenReady().then(() => {
   // setMicGate(true)); macOS TCC stays a second gate regardless.
   if (readConfig().realtimeVoiceEnabled) writeConfig({ realtimeVoiceEnabled: false });
 
+  // One-time Ctrip ASR bootstrap: when CXB_ASR_TOKEN is present and the user
+  // has not picked another STT backend, default Free Flow to the corp broker.
+  {
+    // electron-vite does not inject unprefixed .env.local keys — load ours if unset.
+    loadCxbAsrTokenFromEnvFile(join(process.cwd(), '.env.local'));
+    const cfg = readConfig();
+    const tokenPresent = !!readCxbAsrToken();
+    if (shouldAutoselectCtrip(cfg, tokenPresent)) {
+      writeConfig({ freeflowProvider: 'ctrip', freeflowCtripAutoselected: true });
+    }
+  }
+
   // Anonymous product analytics (PostHog) — the full contract lives in
   // TELEMETRY.md. No-op unless a build-time key was injected (official releases
   // only), and gated on DO_NOT_TRACK + the telemetryEnabled config (opt-out).
@@ -5212,6 +6053,8 @@ app.whenReady().then(() => {
   initAutoUpdater(() => liveWebContents());
   // Bootstrap the hive (if harnessHome is configured) and start the message router.
   bootstrapHiveServices();
+  try { startBrowserBridge(); } catch (e) { console.error('[browser-bridge] start failed:', e); }
+  try { startAutomationBridge(); } catch (e) { console.error('[automation-bridge] start failed:', e); }
   // Survive sleep/lock. macOS freezes libuv timers during true system sleep, so a
   // locked/idle/slept Mac stops firing schedules and can wedge PTYs. On wake we
   // re-arm the scheduler (catching up missed missions ONCE) + beats + keep-awake,
@@ -5301,7 +6144,7 @@ app.on('will-quit', (e) => {
   e.preventDefault();
   const finish = (): void => app.exit(0);
   Promise.race([
-    analytics.endSession(),
+    Promise.all([analytics.endSession(), seatDrain]),
     new Promise<void>((r) => setTimeout(r, 1200))
   ]).then(finish, finish);
 });
