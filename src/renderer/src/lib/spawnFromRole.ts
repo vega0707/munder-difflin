@@ -82,7 +82,10 @@ export async function spawnFromRole(
       name,
       provider,
       cwd,
-      role: role.title || role.description
+      role: role.title || role.description,
+      // [] = none; omit = inherit. Preserve empty allowlists.
+      ...(role.skills !== undefined ? { skills: [...role.skills] } : {}),
+      ...(role.mcp !== undefined ? { mcp: [...role.mcp] } : {})
     }
   });
 

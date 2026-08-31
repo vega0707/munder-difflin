@@ -5,6 +5,7 @@ import {
   type CreateProjectRole,
   type OfficeCharacterName
 } from './projectTypes';
+import { assertRoleToolIds } from './roleToolIds';
 
 export type RoleSource = 'builtin' | 'user' | 'ai-ui' | 'ai-god';
 
@@ -38,6 +39,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: '产品经理',
     description: '拆需求、排优先级、对齐交付，只把关键决策升级给你。',
     character: 'michael',
+    skills: ['capabilities', 'md-hive-sync', 'temporal'],
+    mcp: ['sequential-thinking', 'filesystem', 'time'],
     builtin: true,
     source: 'builtin'
   },
@@ -87,6 +90,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: 'Tech Lead',
     description: 'Orchestrates the squad, splits work, unblocks, escalates only the sharp calls.',
     character: 'michael',
+    skills: ['capabilities', 'md-hive-sync', 'temporal'],
+    mcp: ['sequential-thinking', 'filesystem', 'git'],
     builtin: true,
     source: 'builtin'
   },
@@ -95,6 +100,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: 'Frontend',
     description: 'UI, client state, and accessibility.',
     character: 'jim',
+    skills: ['today', 'capabilities'],
+    mcp: ['filesystem', 'context7', 'fetch'],
     builtin: true,
     source: 'builtin'
   },
@@ -103,6 +110,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: 'Backend',
     description: 'APIs, data, and service boundaries.',
     character: 'dwight',
+    skills: ['today', 'md-hive-sync'],
+    mcp: ['filesystem', 'git', 'context7'],
     builtin: true,
     source: 'builtin'
   },
@@ -111,6 +120,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: 'QA',
     description: 'Tests, regressions, and release confidence.',
     character: 'creed',
+    skills: ['md-audit'],
+    mcp: ['filesystem', 'git', 'sequential-thinking'],
     builtin: true,
     source: 'builtin'
   },
@@ -119,6 +130,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: 'Frontend',
     description: 'Product UI and client experience.',
     character: 'pam',
+    skills: ['today', 'capabilities'],
+    mcp: ['filesystem', 'context7', 'fetch'],
     builtin: true,
     source: 'builtin'
   },
@@ -127,6 +140,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: 'Backend',
     description: 'Services, persistence, and contracts.',
     character: 'dwight',
+    skills: ['today', 'md-hive-sync'],
+    mcp: ['filesystem', 'git', 'context7'],
     builtin: true,
     source: 'builtin'
   },
@@ -135,6 +150,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: 'QA',
     description: 'Coverage, acceptance, and bug triage.',
     character: 'creed',
+    skills: ['md-audit'],
+    mcp: ['filesystem', 'git', 'sequential-thinking'],
     builtin: true,
     source: 'builtin'
   },
@@ -143,6 +160,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: 'DevOps',
     description: 'CI, environments, and ship pipelines.',
     character: 'ryan',
+    skills: ['temporal', 'today'],
+    mcp: ['filesystem', 'git', 'time', 'fetch'],
     builtin: true,
     source: 'builtin'
   },
@@ -151,15 +170,19 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: 'Tech Lead',
     description: 'Owns the plan and the hand-offs across the split.',
     character: 'michael',
+    skills: ['capabilities', 'md-hive-sync', 'temporal'],
+    mcp: ['sequential-thinking', 'filesystem', 'git'],
     builtin: true,
     source: 'builtin'
   },
-  // Solo / office
+  // Solo / office — coordination seats: explicit empty allowlists (no inherit-all)
   {
     id: 'boss-solo',
     title: 'Boss',
     description: 'Runs the floor alone.',
     character: 'michael',
+    skills: [],
+    mcp: [],
     builtin: true,
     source: 'builtin'
   },
@@ -168,6 +191,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: 'Head of accounting',
     description: 'Runs the books and the floor.',
     character: 'angela',
+    skills: [],
+    mcp: [],
     builtin: true,
     source: 'builtin'
   },
@@ -176,6 +201,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: 'Accountant',
     description: 'Numbers, reconciliation, quiet judgment.',
     character: 'oscar',
+    skills: [],
+    mcp: [],
     builtin: true,
     source: 'builtin'
   },
@@ -184,6 +211,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: 'Accountant',
     description: 'Books, chili, and good intentions.',
     character: 'kevin',
+    skills: [],
+    mcp: [],
     builtin: true,
     source: 'builtin'
   },
@@ -192,6 +221,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: 'Assistant (to the) RM',
     description: 'Closes deals and runs the floor.',
     character: 'dwight',
+    skills: [],
+    mcp: [],
     builtin: true,
     source: 'builtin'
   },
@@ -200,6 +231,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: 'Sales',
     description: 'Accounts and carefully timed pranks.',
     character: 'jim',
+    skills: [],
+    mcp: [],
     builtin: true,
     source: 'builtin'
   },
@@ -208,6 +241,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: 'Sales',
     description: 'Accounts and the crossword.',
     character: 'stanley',
+    skills: [],
+    mcp: [],
     builtin: true,
     source: 'builtin'
   },
@@ -216,6 +251,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: 'Sales',
     description: 'Accounts and party planning intel.',
     character: 'phyllis',
+    skills: [],
+    mcp: [],
     builtin: true,
     source: 'builtin'
   },
@@ -224,6 +261,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: 'Regional Manager',
     description: 'Runs the floor.',
     character: 'michael',
+    skills: [],
+    mcp: [],
     builtin: true,
     source: 'builtin'
   },
@@ -232,6 +271,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: 'Sales',
     description: 'Seller and sometime co-manager energy.',
     character: 'jim',
+    skills: [],
+    mcp: [],
     builtin: true,
     source: 'builtin'
   },
@@ -240,6 +281,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: 'Reception / office',
     description: 'Front desk and floor glue.',
     character: 'pam',
+    skills: [],
+    mcp: [],
     builtin: true,
     source: 'builtin'
   },
@@ -248,6 +291,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: 'Assistant (to the) RM',
     description: 'Loyalty, beets, and follow-through.',
     character: 'dwight',
+    skills: [],
+    mcp: [],
     builtin: true,
     source: 'builtin'
   },
@@ -256,6 +301,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: 'Accounting lead',
     description: 'Rules, cats, and the books.',
     character: 'angela',
+    skills: [],
+    mcp: [],
     builtin: true,
     source: 'builtin'
   },
@@ -264,6 +311,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: 'Committee chair',
     description: 'Plans the party and the floor.',
     character: 'pam',
+    skills: [],
+    mcp: [],
     builtin: true,
     source: 'builtin'
   },
@@ -272,6 +321,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: 'Committee',
     description: 'Standards enforcement.',
     character: 'angela',
+    skills: [],
+    mcp: [],
     builtin: true,
     source: 'builtin'
   },
@@ -280,6 +331,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: 'Committee',
     description: 'Cake and morale.',
     character: 'phyllis',
+    skills: [],
+    mcp: [],
     builtin: true,
     source: 'builtin'
   },
@@ -288,6 +341,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: 'Committee',
     description: 'Supplies and chaos.',
     character: 'meredith',
+    skills: [],
+    mcp: [],
     builtin: true,
     source: 'builtin'
   },
@@ -297,6 +352,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: '仓库清洁工',
     description: 'keeps the codebase tidy and healthy',
     character: 'creed',
+    skills: ['md-audit', 'capabilities'],
+    mcp: ['filesystem', 'git'],
     builtin: true,
     source: 'builtin'
   },
@@ -305,6 +362,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: '文档写手',
     description: 'keeps docs in sync with the code',
     character: 'pam',
+    skills: ['md-fetch-summarize', 'md-audit'],
+    mcp: ['filesystem', 'fetch', 'context7'],
     builtin: true,
     source: 'builtin'
   },
@@ -313,6 +372,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: '缺陷分诊员',
     description: 'investigates and root-causes bugs',
     character: 'stanley',
+    skills: ['today', 'yesterday'],
+    mcp: ['filesystem', 'git', 'sequential-thinking'],
     builtin: true,
     source: 'builtin'
   },
@@ -321,6 +382,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: '研究助理',
     description: 'gathers and summarizes information',
     character: 'oscar',
+    skills: ['md-fetch-summarize', 'last7Days'],
+    mcp: ['fetch', 'context7', 'sequential-thinking'],
     builtin: true,
     source: 'builtin'
   },
@@ -329,6 +392,8 @@ export const BUILTIN_ROLES: RoleDefinition[] = [
     title: '发布经理',
     description: 'prepares and ships releases',
     character: 'dwight',
+    skills: ['temporal', 'today'],
+    mcp: ['filesystem', 'git', 'time'],
     builtin: true,
     source: 'builtin'
   }
@@ -362,8 +427,9 @@ export function resolveRoleToCreateProjectRole(
     title: role.title,
     description: role.description
   };
-  if (role.skills?.length) out.skills = [...role.skills];
-  if (role.mcp?.length) out.mcp = [...role.mcp];
+  // Preserve empty arrays: [] = none; omit/undefined = inherit floor defaults.
+  if (role.skills !== undefined) out.skills = [...role.skills];
+  if (role.mcp !== undefined) out.mcp = [...role.mcp];
   return out;
 }
 
@@ -411,12 +477,14 @@ export function assertRoleDraft(input: unknown): Omit<RoleDefinition, 'id' | 'bu
   const mcp = Array.isArray(raw.mcp)
     ? raw.mcp.filter((x): x is string => typeof x === 'string' && x.trim().length > 0).map((x) => x.trim())
     : undefined;
+  assertRoleToolIds(skills, mcp);
   return {
     title,
     description,
     character: character as OfficeCharacterName,
-    skills: skills?.length ? skills : undefined,
-    mcp: mcp?.length ? mcp : undefined,
+    // Explicit [] means none; omit means inherit. Do not collapse [] → undefined.
+    skills,
+    mcp,
     source: source === 'ai-ui' || source === 'ai-god' || source === 'user' ? source : 'user'
   };
 }

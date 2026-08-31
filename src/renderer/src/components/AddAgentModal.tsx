@@ -433,7 +433,9 @@ export function AddAgentModal({ onClose, config, onConfigChange }: AddAgentModal
         cwd,
         role: description.trim() || undefined,
         // A hire manifest may carry validated capability tags (routing hints).
-        capabilities: hireMeta?.capabilities
+        capabilities: hireMeta?.capabilities,
+        ...(hireMeta?.skills !== undefined ? { skills: [...hireMeta.skills] } : {}),
+        ...(hireMeta?.mcpServers !== undefined ? { mcp: [...hireMeta.mcpServers] } : {})
       }
     });
     if (!spawnRes.ok) {

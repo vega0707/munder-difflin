@@ -65,6 +65,15 @@ test('resolveRoleToCreateProjectRole copies skills/mcp', () => {
   assert.equal(role.asGod, false);
 });
 
+test('coordination roles use empty allowlists (no inherit-all)', () => {
+  const sales = roleById(BUILTIN_ROLES, 'sales-jim');
+  assert.deepEqual(sales.skills, []);
+  assert.deepEqual(sales.mcp, []);
+  const resolved = resolveRoleToCreateProjectRole(sales, false);
+  assert.deepEqual(resolved.skills, []);
+  assert.deepEqual(resolved.mcp, []);
+});
+
 test('mergeRoleCatalog never duplicates builtin ids', () => {
   const merged = mergeRoleCatalog([
     { id: 'pm', title: 'fake', description: 'x', character: 'jim', builtin: false },

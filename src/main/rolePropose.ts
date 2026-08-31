@@ -11,6 +11,8 @@ import {
   type OfficeCharacterName
 } from '../shared/projectTypes';
 import { assertRoleDraft } from '../shared/roleCatalog';
+import { BUNDLED_SKILL_IDS } from '../shared/bundledSkills';
+import { safeReadonlyMcpIds } from '../shared/roleToolIds';
 
 const PROPOSE_TIMEOUT_MS = 45_000;
 
@@ -20,6 +22,8 @@ Return ONLY a JSON object (no markdown) with keys:
   "description" (duty blurb, <=200 chars),
   "character" (one of: ${OFFICE_CHARACTER_NAMES.join(', ')})
 Optional: "skills" / "mcp" as string arrays of catalog ids.
+  skills allowlist: ${BUNDLED_SKILL_IDS.join(', ')}
+  mcp allowlist (prefer safe-readonly): ${safeReadonlyMcpIds().join(', ')}
 Brief from the human:
 ${brief.trim()}
 `;

@@ -1,13 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { BUNDLED_SKILL_IDS } from '@shared/bundledSkills';
 import { MCP_CATALOG } from '@shared/mcpCatalog';
 import { PixelButton } from './PixelButton';
 
-const BUNDLED_SKILL_HINTS = [
-  'capabilities', 'today', 'yesterday', 'thisWeek', 'lastWeek',
-  'thisMonth', 'lastMonth', 'thisQuarter', 'lastQuarter', 'thisYear', 'lastYear',
-  'last7Days', 'last30Days', 'temporal', 'md-audit', 'md-hive-sync', 'md-fetch-summarize'
-];
+const BUNDLED_SKILL_HINTS = [...BUNDLED_SKILL_IDS];
 
 export interface SeatToolsPanelProps {
   agentId: string;
