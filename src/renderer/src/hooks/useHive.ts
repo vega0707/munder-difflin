@@ -16,7 +16,7 @@ import {
 } from '../../../shared/providerAutomation';
 import { DEFAULT_CONTEXT_TRIGGER, type ContextRule } from '../../../shared/triggers';
 import type { AgentProvider } from '../../../shared/agentProvider';
-import { bridgeOf, providerPreset, providerNeedsPty } from '../../../shared/agentProvider';
+import { bridgeOf, providerPreset, providerNeedsPty, resolveAgentProvider } from '../../../shared/agentProvider';
 import { isDurableRole, preferredAgentRole, roleForHiveSpawn } from '../../../shared/agentRole';
 import { inboxNudgeText } from '../../../shared/hiveNudge';
 import { resolveGodName } from '../../../shared/godIdentity';
@@ -430,9 +430,9 @@ export function useHive(config: HarnessConfig | null): void {
       useStore.getState().removeAgent(godId);
 
       const godName = resolveGodName(reg?.agents?.[godId]?.name);
-      const godProvider = (reg?.agents?.[godId]?.provider as AgentProvider | undefined)
-        ?? config.godProvider
-        ?? 'claude';
+      const godProvider = resolveAgentProvider(
+        (reg?.agents?.[godId]?.provider as AgentProvider | undefined) ?? config.godProvider
+      );
       const godModel = config.godModel;
       const command = providerNeedsPty(godProvider)
         ? buildSpawnCommand(config, godModel, godProvider)

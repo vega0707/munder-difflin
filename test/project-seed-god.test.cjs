@@ -34,8 +34,27 @@ test('seedProjectCast registers exactly one god', async (t) => {
   assert.equal(reg.godId, 'god');
   assert.equal(reg.agents.god.isGod, true);
   assert.equal(reg.agents.god.name, 'Dwight');
+  assert.equal(reg.agents.god.provider, 'builtin');
   assert.equal(!!reg.agents.jim.isGod, false);
+  assert.equal(reg.agents.jim.provider, 'builtin');
   assert.equal(reg.agents.pam.name, 'Pam');
+  assert.equal(reg.agents.pam.provider, 'builtin');
+});
+
+test('seedProjectCast god can use a CLI provider while extras stay builtin', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'md-seed-god-cli-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const hive = new HiveManager(() => home, undefined, 'p1');
+  await seedProjectCast(hive, {
+    godCharacter: 'dwight',
+    godName: 'Dwight',
+    extraCharacters: ['jim'],
+    cwd: home,
+    provider: 'claude'
+  });
+  const reg = hive.registry();
+  assert.equal(reg.agents.god.provider, 'claude');
+  assert.equal(reg.agents.jim.provider, 'builtin');
 });
 
 test('createProject refuses to run without a god role', async (t) => {
@@ -76,6 +95,8 @@ test('createProject seeds the chosen god into the new hive', async (t) => {
   const reg = hive.registry();
   assert.equal(reg.godId, 'god');
   assert.equal(reg.agents.god.name, 'Angela');
+  assert.equal(reg.agents.god.provider, 'builtin');
   assert.equal(reg.agents.oscar.name, 'Oscar');
+  assert.equal(reg.agents.oscar.provider, 'builtin');
   persist.close();
 });

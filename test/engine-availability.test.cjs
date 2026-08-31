@@ -53,8 +53,17 @@ test('the repro: grok, antigravity and qwen are offered by the wizard but cannot
     const msg = engineAvailabilityMessage(a, 'Grok');
     assert.match(msg, /not installed/);
     assert.match(msg, /check again/);
-    assert.match(msg, /Claude Code/);
+    assert.match(msg, /Built in/);
     assert.doesNotMatch(msg, /[–—-]/, 'no dashes in user facing prose');
+  }
+});
+
+test('builtin is always installed and never blocks, even with no probe', () => {
+  for (const statuses of [undefined, [], statusesFor([])]) {
+    const a = classifyEngineAvailability(statuses, 'builtin');
+    assert.equal(a.state, 'installed');
+    assert.equal(engineBlocksOnboarding(a), false);
+    assert.equal(engineAvailabilityBadge(a), 'INSTALLED');
   }
 });
 

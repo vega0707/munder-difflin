@@ -5,6 +5,8 @@ import {
   providerPreset,
   inferAgentProvider,
   isClaudeProvider,
+  DEFAULT_AGENT_PROVIDER,
+  resolveAgentProvider,
   type AgentProvider
 } from '@shared/agentProvider';
 import type {
@@ -20,6 +22,8 @@ export {
   providerPreset,
   inferAgentProvider,
   isClaudeProvider,
+  DEFAULT_AGENT_PROVIDER,
+  resolveAgentProvider,
   type AgentProvider
 };
 

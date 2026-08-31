@@ -32,6 +32,8 @@ import {
   providerPreset,
   tokenizeCommand,
   AGENT_PROVIDER_PRESETS,
+  DEFAULT_AGENT_PROVIDER,
+  resolveAgentProvider,
   type AgentProvider
 } from '@/store/config';
 import { canReceiveInbox } from '@shared/agentProvider';
@@ -364,7 +366,7 @@ function FloorTab({ seed }: { seed: { text: string; seq: number } }) {
   // Per-agent token limit (overrides the floor budget for that agent), keyed by id.
   const [agentTokenCaps, setAgentTokenCaps] = useState<Record<string, number>>({});
   const [restarting, setRestarting] = useState<string | null>(null);
-  const [engineProvider, setEngineProvider] = useState<AgentProvider>('claude');
+  const [engineProvider, setEngineProvider] = useState<AgentProvider>(DEFAULT_AGENT_PROVIDER);
   const [engineModel, setEngineModel] = useState<string | undefined>(undefined);
   const [restartErrors, setRestartErrors] = useState<Record<string, string>>({});
   // The harness's own default model (Settings → default model). Michael and every
@@ -386,7 +388,7 @@ function FloorTab({ seed }: { seed: { text: string; seq: number } }) {
       setRepos(c.registeredRepos ?? []);
       setTokenCap(c.costCapTokens);
       setAgentTokenCaps(c.agentTokenCaps ?? {});
-      setEngineProvider(c.godProvider ?? 'claude');
+      setEngineProvider(resolveAgentProvider(c.godProvider));
       setEngineModel(c.godModel);
       setDefaultModel(c.defaultModel);
     }).catch(() => { /* noop */ });
@@ -899,10 +901,11 @@ function FloorTab({ seed }: { seed: { text: string; seq: number } }) {
                 >
                   {AGENT_PROVIDER_PRESETS.filter((p) => canReceiveInbox(p.id)).map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.label}{p.id === 'claude' ? ' ★' : ''}
+                      {p.label}{p.id === DEFAULT_AGENT_PROVIDER ? ' ★' : ''}
                     </option>
                   ))}
                 </Select>
+                {providerPreset(engineProvider).supportsModel && (
                 <Select
                   value={engineModel ?? ''}
                   disabled={restarting === a.id}
@@ -912,6 +915,7 @@ function FloorTab({ seed }: { seed: { text: string; seq: number } }) {
                     <option key={m.label} value={m.id ?? ''}>{m.label}</option>
                   ))}
                 </Select>
+                )}
                 <PixelButton
                   variant="secondary"
                   size="sm"

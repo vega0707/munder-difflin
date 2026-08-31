@@ -37,6 +37,9 @@ export type AgentProvider =
   | 'builtin'
   | 'custom';
 
+/** Default engine when the user has not picked a CLI. No install, no PTY. */
+export const DEFAULT_AGENT_PROVIDER: AgentProvider = 'builtin';
+
 /** Structured descriptor for how a NON-hiveAware provider gets hive lifecycle
  *  events (live status + Stop→inbox-drain + cost), introduced alongside the legacy
  *  `hookBridge` so call sites can switch on `bridge.kind` without a big-bang
@@ -169,6 +172,21 @@ export interface AgentProviderPreset {
 }
 
 export const AGENT_PROVIDER_PRESETS: AgentProviderPreset[] = [
+  {
+    // Product-owned inbox runner. No CLI, no PTY — the main process drains
+    // hive inbox and writes protocol replies so a floor can open without
+    // installing Claude/Codex/Cursor. First in the picker so a machine with
+    // no agent CLI still has a working default. Not a hosted cloud model.
+    id: 'builtin',
+    label: 'Built-in',
+    defaultCommand: 'builtin',
+    commandGroups: [],
+    autoModeFlag: '',
+    supportsModel: false,
+    autoFlag: '',
+    hiveAware: false,
+    canReceiveInbox: true
+  },
   {
     id: 'claude',
     label: 'Claude Code',
@@ -566,20 +584,6 @@ export const AGENT_PROVIDER_PRESETS: AgentProviderPreset[] = [
     docsUrl: 'https://cursor.com/docs/cli/install'
   },
   {
-    // Product-owned inbox runner. No CLI, no PTY — the main process drains
-    // hive inbox and writes protocol replies so a floor can open without
-    // installing Claude/Codex/Cursor. Not a hosted cloud model.
-    id: 'builtin',
-    label: 'Built-in',
-    defaultCommand: 'builtin',
-    commandGroups: [],
-    autoModeFlag: '',
-    supportsModel: false,
-    autoFlag: '',
-    hiveAware: false,
-    canReceiveInbox: true
-  },
-  {
     id: 'custom',
     label: 'Custom',
     defaultCommand: '',
@@ -613,6 +617,11 @@ export function isAgentProvider(value: unknown): value is AgentProvider {
 
 export function normalizeAgentProvider(value: unknown): AgentProvider | undefined {
   return isAgentProvider(value) ? value : undefined;
+}
+
+/** Honor an explicit provider; otherwise the no-install Built-in default. */
+export function resolveAgentProvider(value: unknown): AgentProvider {
+  return normalizeAgentProvider(value) ?? DEFAULT_AGENT_PROVIDER;
 }
 
 export function providerPreset(provider: AgentProvider): AgentProviderPreset {

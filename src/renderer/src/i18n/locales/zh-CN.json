@@ -556,6 +556,7 @@
     "providerAntigravity": "使用 Gemini 模型启动 Antigravity CLI（agy）",
     "providerCodex": "启动 Codex CLI（codex），不带 Claude 专属标志",
     "providerCustom": "运行任意命令——不带 Claude 专属标志",
+    "providerBuiltin": "办公室内置跑者——无需安装 CLI，在本座位收取蜂巢邮件。",
     "model": "模型",
     "cliDefaultModel": "CLI 默认模型",
     "fromHire": "{{model}}（来自 hire）",
@@ -669,6 +670,7 @@
       }
     },
     "providerBlurb": {
+      "builtin": "内置 —— 不用装 CLI，新机器也能开楼层。",
       "claude": "Claude Code — Anthropic",
       "codex": "Codex — OpenAI",
       "antigravity": "Antigravity — Google Gemini",
@@ -688,8 +690,8 @@
     "orchestrator": {
       "descPlain": "{{godName}} 就是你的克隆——他读取你的请求，拆成任务，分给合适的智能体。他是楼层的老板；而你仍然是他的老板。选择用什么 AI 引擎驱动他。",
       "desc": "{{godName}} 就是你的克隆——你刚认识的那层楼的老板。他分流你的请求、分配任务、管理团队，同时把真正需要你的情况升级上来。选择驱动他的引擎和模型；给他一个更长上下文、更强能力的模型。",
-      "cliAgentPlain": "一个<strong>CLI 智能体</strong>是运行在你电脑上的 AI 编程助手 —— 常见的有 Claude Code（Anthropic）、Codex（OpenAI）和 Antigravity（Google Gemini）。<strong>你的克隆体</strong>是常驻运行、打理整个办公室的那一个。我们推荐使用 Opus 4.8（1M）的 Claude Code。其他引擎之后可以随时添加或切换。",
-      "cliAgent": "每个选项都是一个<strong>CLI 引擎</strong>（Claude Code、Codex、Antigravity/Gemini，或本地代理如 Qwen）。标记为 INSTALLED 的引擎已在本机就绪；INSTALLS ON FIRST RUN 表示应用会在 {{godName}} 首次启动时进行安装。<strong>你的克隆体</strong>（{{godName}}）是统筹整个 hive 的引擎。推荐：Claude Code · Opus 4.8 · 1M。其他提供方之后可按智能体逐一接入。",
+      "cliAgentPlain": "一个<strong>CLI 智能体</strong>是运行在你电脑上的 AI 编程助手 —— 常见的有 Claude Code（Anthropic）、Codex（OpenAI）和 Antigravity（Google Gemini）。你不必先装它们：<strong>内置</strong>是默认项，无需安装。<strong>你的克隆体</strong>是常驻运行、打理整个办公室的那一个。之后随时可以添加或切换 CLI 引擎。",
+      "cliAgent": "每个选项都是一个引擎。<strong>内置</strong>是默认：无需安装 CLI，已经可用。其余是<strong>CLI 引擎</strong>（Claude Code、Codex、Antigravity/Gemini、Cursor，或本地代理如 Qwen）。标记为 INSTALLED 的引擎已在本机就绪；INSTALLS ON FIRST RUN 表示应用会在 {{godName}} 首次启动时进行安装。<strong>你的克隆体</strong>（{{godName}}）统筹整个 hive。其他提供方可按智能体之后再接。",
       "recommended": "推荐",
       "model": "模型",
       "modelNote": "这只设置 {{godName}} 的引擎。之后你可以在每个智能体上运行其他提供商。"

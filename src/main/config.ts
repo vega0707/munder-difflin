@@ -7,6 +7,7 @@ import {
   defaultCommandForProvider,
   inferAgentProvider,
   providerPreset,
+  resolveAgentProvider,
   type AgentProvider
 } from '../shared/agentProvider';
 import { defaultMcpDefaults } from '../shared/mcpCatalog';
@@ -437,8 +438,8 @@ const DEFAULTS: HarnessConfig = {
   autoMode: true,
   orchestratorMaySpawn: false,
   defaultCommand: 'claude',
-  godProvider: 'claude',
-  godModel: 'claude-opus-4-8',
+  godProvider: 'builtin',
+  godModel: undefined,
   // Global default model for every agent that hasn't picked one explicitly — wins
   // over the role-based tiers (modelForRole) in the spawn handler, so all agents
   // (incl. god) default to Fable 5. A per-agent model choice still overrides it.
@@ -768,7 +769,9 @@ export function modelForRole(
   if (meta.isGod) {
     // GOD engine is selectable: an explicit godModel wins, else the chosen
     // provider's recommended orchestrator model, else the legacy Opus default.
-    const preset = providerPreset(config?.godProvider ?? 'claude');
+    const provider = resolveAgentProvider(config?.godProvider);
+    if (provider === 'builtin') return config?.godModel;
+    const preset = providerPreset(provider);
     return config?.godModel ?? preset.recommendedOrchestratorModel ?? MODEL_GOD;
   }
   const hay = `${meta.role ?? ''} ${(meta.capabilities ?? []).join(' ')}`.toLowerCase();

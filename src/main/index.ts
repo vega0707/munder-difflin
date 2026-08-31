@@ -97,6 +97,7 @@ import {
   nonInteractiveEnvForProvider,
   providerPreset,
   installInfoForProvider,
+  resolveAgentProvider,
   type AgentProvider
 } from '../shared/agentProvider';
 import { buildMissingCliScript, chooseInstallRung } from './cliInstall';
@@ -3437,7 +3438,7 @@ ipcMain.handle('config:update', (_evt, patch: Partial<HarnessConfig>) => {
   // the launch → first-agent funnel. `provider` is the engine chosen in the wizard.
   // Fired here (main), not in the renderer, so it rides the same allowlist as the rest.
   if (!wasOnboarded && next.onboardingComplete) {
-    analytics.track('onboarding_completed', { provider: next.godProvider ?? 'claude' });
+    analytics.track('onboarding_completed', { provider: next.godProvider ?? 'builtin' });
   }
   // Keep the hive's mirror of the spawn gate current. The queue itself reads
   // config per tick so it gates immediately; this is for the PROMPT, which is
@@ -3716,7 +3717,8 @@ ipcMain.handle('project:create', async (_evt, payload: unknown) => {
   const res = await projectRegistry.createProject({
     name: body.name,
     defaultCwd: typeof body.defaultCwd === 'string' ? body.defaultCwd : undefined,
-    roles
+    roles,
+    provider: resolveAgentProvider(readConfig().godProvider)
   });
   if (res.ok) {
     try { bootstrapHiveServices(); } catch (e) { console.error('[project] bootstrap after create:', e); }

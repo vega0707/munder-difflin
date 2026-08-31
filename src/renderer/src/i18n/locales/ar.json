@@ -556,6 +556,7 @@
     "providerAntigravity": "أنشئ أداة Antigravity (agy) بنموذج Gemini",
     "providerCodex": "أنشئ أداة Codex (codex) بلا رايات خاصة بـClaude",
     "providerCustom": "شغّل أي أمر — بلا رايات خاصة بـClaude",
+    "providerBuiltin": "مشغّل المكتب المدمج — بلا CLI. يصرف بريد الخلية على هذا المقعد.",
     "model": "النموذج",
     "cliDefaultModel": "النموذج الافتراضي للـCLI",
     "fromHire": "{{model}} (من التعيين)",
@@ -669,6 +670,7 @@
       }
     },
     "providerBlurb": {
+      "builtin": "مدمج — بلا CLI للتثبيت. يعمل على جهاز جديد.",
       "claude": "Claude Code — Anthropic",
       "codex": "Codex — OpenAI",
       "antigravity": "Antigravity — Google Gemini",
@@ -688,8 +690,8 @@
     "orchestrator": {
       "descPlain": "{{godName}} هو نسختك — يقرأ طلباتك، ويفكّكها إلى مهام، ويسلّمها إلى الوكيل المناسب. هو مدير الأرضية؛ وأنت ما زلت مديره. اختر محرّك الذكاء الاصطناعي الذي يشغّله.",
       "desc": "{{godName}} هو نسختك — مدير الأرضية الذي قابلته للتوّ. يفرز طلباتك، ويُسنِد المهام، ويُدير الفريق، ويُصعِّد كل ما يحتاجك فعلًا. اختر المحرّك والنموذج اللذين يشغّلانه؛ وأعطِه نموذجًا بسياق أطول وقدرة أعلى.",
-      "cliAgentPlain": "<strong>وكيل الـCLI</strong> مساعد برمجة ذكي يعمل على حاسوبك — وأشهرها Claude Code (من Anthropic) وCodex (من OpenAI) وAntigravity (من Google Gemini). و<strong>نسختك</strong> هي الوكيل الدائم الذي يُدير مكتبك كله. ننصح بـClaude Code على Opus 4.8 (1M). ويمكنك إضافة الباقي أو التبديل إليها لاحقًا.",
-      "cliAgent": "كل خيار هو <strong>محرّك CLI</strong> (Claude Code أو Codex أو Antigravity/Gemini أو وسيط محلي مثل Qwen). المحرّكات المعلَّمة بـINSTALLED موجودة على هذا الجهاز؛ وINSTALLS ON FIRST RUN يعني أن التطبيق يُعِدّها عند أول تشغيل لـ{{godName}}. و<strong>نسختك</strong> ({{godName}}) هي المحرّك الذي ينسّق الخلية كلها. الموصى به: Claude Code · Opus 4.8 · 1M. ويمكن ربط مزوّدين آخرين لكل وكيل لاحقًا.",
+      "cliAgentPlain": "<strong>وكيل الـCLI</strong> مساعد برمجة ذكي يعمل على حاسوبك — وأشهرها Claude Code (من Anthropic) وCodex (من OpenAI) وAntigravity (من Google Gemini). ولست بحاجة إلى أحدها للبدء: <strong>المدمج</strong> هو الافتراضي ولا يحتاج تثبيتاً. و<strong>نسختك</strong> هي الوكيل الدائم الذي يُدير مكتبك كله. ويمكنك إضافة محرّكات CLI أو التبديل إليها لاحقًا.",
+      "cliAgent": "كل خيار هو محرّك. <strong>المدمج</strong> هو الافتراضي: بلا CLI للتثبيت وهو جاهز. والباقي <strong>محرّكات CLI</strong> (Claude Code أو Codex أو Antigravity/Gemini أو Cursor أو وسيط محلي مثل Qwen). INSTALLED يعني أن الملف التنفيذي على هذا الجهاز؛ وINSTALLS ON FIRST RUN يعني أن التطبيق يُعِدّه عند أول تشغيل لـ{{godName}}. و<strong>نسختك</strong> ({{godName}}) تنسّق الخلية. ويمكن ربط مزوّدين آخرين لكل وكيل لاحقًا.",
       "recommended": "موصى به",
       "model": "النموذج",
       "modelNote": "هذا يضبط محرّك {{godName}} فقط. ويمكنك تشغيل مزوّدين آخرين لكل وكيل لاحقًا."

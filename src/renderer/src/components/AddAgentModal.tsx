@@ -26,9 +26,10 @@ import {
   buildSpawnCommand,
   tokenizeCommand,
   modelsForProvider,
-  inferAgentProvider,
   providerPreset,
-  isClaudeProvider
+  isClaudeProvider,
+  DEFAULT_AGENT_PROVIDER,
+  resolveAgentProvider
 } from '@/store/config';
 import { useRtl } from '@/i18n/useDirection';
 
@@ -179,15 +180,15 @@ export function AddAgentModal({ onClose, config, onConfigChange }: AddAgentModal
    *  from the LOCAL config builder, with the manifest's validated flags
    *  appended. A manifest can never name the binary itself. */
   const hireCommand = (m: HireManifest): string => {
-    const prov: AgentProvider = m.provider ?? inferAgentProvider(config.defaultCommand);
+    const prov: AgentProvider = resolveAgentProvider(m.provider);
     const base = buildSpawnCommand(config, m.model, prov);
     return m.commandFlags?.length ? `${base} ${m.commandFlags.join(' ')}` : base;
   };
 
-  // Default provider follows whatever the global default command is (claude
-  // unless the user reconfigured it); the model only carries over for Claude.
-  const initialProvider = inferAgentProvider(config.defaultCommand);
-  const initialModel = isClaudeProvider(initialProvider) ? config.defaultModel : undefined;
+  // New hires default to Built-in so a machine with no CLI agent still works.
+  // A hire manifest may still name Claude/Codex/Cursor.
+  const initialProvider = DEFAULT_AGENT_PROVIDER;
+  const initialModel = undefined;
 
   const [name, setName] = useState(pendingHire?.name ?? 'Jim');
   const [character, setCharacter] = useState<OfficeCharacterName>(knownCharacter(pendingHire?.character));
@@ -894,7 +895,7 @@ export function AddAgentModal({ onClose, config, onConfigChange }: AddAgentModal
                                   : p.id === 'codex'
                                     ? tr('addAgent.providerCodex')
                                   : p.id === 'builtin'
-                                    ? 'Office runner — no CLI required. Drains hive mail on this seat.'
+                                    ? tr('addAgent.providerBuiltin')
                                     : p.id === 'custom'
                                       ? tr('addAgent.providerCustom')
                                       : p.label
@@ -1020,6 +1021,7 @@ export function AddAgentModal({ onClose, config, onConfigChange }: AddAgentModal
                       </div>
                     )}
 
+                    {provider !== 'builtin' && (
                     <Row label={config.autoMode && preset.autoFlag ? tr('addAgent.commandAuto') : tr('addAgent.command')}>
                       <input
                         value={command}
@@ -1036,6 +1038,7 @@ export function AddAgentModal({ onClose, config, onConfigChange }: AddAgentModal
                         style={{ ...inputStyle, fontFamily: 'var(--cth-font-mono)' }}
                       />
                     </Row>
+                    )}
                   </>
                 )}
 

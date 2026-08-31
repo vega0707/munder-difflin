@@ -24,6 +24,7 @@ import { seedProjectCast } from './seedProjectCast';
 import { RosterStore } from './roster';
 import { stampFloorFrom, type FloorAddress } from '../shared/floorAddress';
 import type { HiveMessage } from './hive';
+import type { AgentProvider } from '../shared/agentProvider';
 
 export function projectRootOf(harnessHome: string, projectId: string): string {
   return join(harnessHome, 'projects', projectId);
@@ -139,6 +140,8 @@ export class ProjectRegistry {
     activate?: boolean;
     /** Join a hub floor using its existing id. Generated when omitted. */
     projectId?: string;
+    /** Engine for the opening god. Extra seats seed as Built-in. */
+    provider?: AgentProvider;
   }): Promise<ProjectMutationResult> {
     const home = this.opts.getHarnessHome();
     if (!home) return { ok: false, code: 'CREATE_FAILED', error: 'no harnessHome' };
@@ -171,7 +174,8 @@ export class ProjectRegistry {
         godCharacter: parsed.godCharacter,
         godName: parsed.godName,
         extraCharacters: parsed.extraCharacters,
-        cwd
+        cwd,
+        provider: input.provider
       });
       const meta: ProjectMeta = {
         projectId,

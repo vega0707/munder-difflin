@@ -5,8 +5,15 @@ const assert = require('node:assert/strict');
 const loadTs = require('./load-ts.cjs');
 
 const { draftBuiltinReply, builtinShouldReply } = loadTs('src/shared/builtinAgent.ts');
-const { isAgentProvider, inferAgentProvider, canReceiveInbox, providerNeedsPty } =
-  loadTs('src/shared/agentProvider.ts');
+const {
+  isAgentProvider,
+  inferAgentProvider,
+  canReceiveInbox,
+  providerNeedsPty,
+  AGENT_PROVIDER_PRESETS,
+  DEFAULT_AGENT_PROVIDER,
+  resolveAgentProvider
+} = loadTs('src/shared/agentProvider.ts');
 
 test('builtin is a selectable inbox-capable provider with no PTY', () => {
   assert.equal(isAgentProvider('builtin'), true);
@@ -14,6 +21,16 @@ test('builtin is a selectable inbox-capable provider with no PTY', () => {
   assert.equal(canReceiveInbox('builtin'), true);
   assert.equal(providerNeedsPty('builtin'), false);
   assert.equal(providerNeedsPty('claude'), true);
+});
+
+test('builtin is the default provider and first picker preset', () => {
+  assert.equal(DEFAULT_AGENT_PROVIDER, 'builtin');
+  assert.equal(resolveAgentProvider(undefined), 'builtin');
+  assert.equal(resolveAgentProvider(null), 'builtin');
+  assert.equal(resolveAgentProvider('not-a-provider'), 'builtin');
+  assert.equal(resolveAgentProvider('claude'), 'claude');
+  assert.equal(AGENT_PROVIDER_PRESETS[0].id, 'builtin');
+  assert.equal(AGENT_PROVIDER_PRESETS.at(-1).id, 'custom');
 });
 
 test('builtin replies to request/query/propose and stays quiet on inform/done', () => {

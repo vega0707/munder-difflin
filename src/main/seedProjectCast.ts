@@ -3,12 +3,19 @@ import type { HiveManager } from './hive';
 import type { OfficeCharacterName } from '../shared/projectTypes';
 import { OFFICE_CHARACTER_DISPLAY } from '../shared/projectTypes';
 import { RosterStore } from './roster';
+import {
+  DEFAULT_AGENT_PROVIDER,
+  resolveAgentProvider,
+  type AgentProvider
+} from '../shared/agentProvider';
 
 export interface SeedProjectCastOpts {
   godCharacter: OfficeCharacterName;
   godName: string;
   extraCharacters: OfficeCharacterName[];
   cwd: string;
+  /** Engine for the opening god. Extra seats always start as Built-in. */
+  provider?: AgentProvider;
 }
 
 /**
@@ -18,12 +25,14 @@ export interface SeedProjectCastOpts {
  */
 export async function seedProjectCast(hive: HiveManager, opts: SeedProjectCastOpts): Promise<void> {
   const cwd = opts.cwd;
+  const godProvider = resolveAgentProvider(opts.provider);
   await hive.ensureAgent({
     id: 'god',
     name: opts.godName,
     cwd,
     isGod: true,
-    role: 'orchestrator (god)'
+    role: 'orchestrator (god)',
+    provider: godProvider
   });
   for (const character of opts.extraCharacters) {
     await hive.ensureAgent({
@@ -31,7 +40,8 @@ export async function seedProjectCast(hive: HiveManager, opts: SeedProjectCastOp
       name: OFFICE_CHARACTER_DISPLAY[character],
       cwd,
       isGod: false,
-      role: OFFICE_CHARACTER_DISPLAY[character]
+      role: OFFICE_CHARACTER_DISPLAY[character],
+      provider: DEFAULT_AGENT_PROVIDER
     });
   }
 
