@@ -28,3 +28,6 @@ docs/media/MunderDifflin*.mp4
 
 # blog theme previews (local only)
 docs/blog-preview-*/
+
+# local deploy/pack scratch (never commit)
+.tmp-deploy-pack/
