@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Publish the three strategy repos to GitHub.
+# Publish strategy repos A–D to GitHub.
 # Usage: ./publish-to-github.sh [owner] [--public]
 set -euo pipefail
 OWNER="${1:-vega0707}"
@@ -8,7 +8,6 @@ VISIBILITY="--private"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-# Prefer full git repos if present; else init from mirrored trees
 SRC_ROOT="${FLEET_REPOS_ROOT:-/home/ubuntu/repos}"
 
 publish_one() {
@@ -38,4 +37,5 @@ publish_one() {
 publish_one a munder-fleet-a
 publish_one b munder-fleet-b
 publish_one c munder-fleet-c
-echo "Done. Remotes: https://github.com/$OWNER/munder-fleet-{a,b,c}"
+publish_one d munder-fleet-d
+echo "Done. Remotes: https://github.com/$OWNER/munder-fleet-{a,b,c,d}"

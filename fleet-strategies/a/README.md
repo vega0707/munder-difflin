@@ -7,7 +7,7 @@
 | | |
 |--|--|
 | 策略代号 | **A** |
-| 姊妹仓 | [`munder-fleet-b`](../munder-fleet-b)（中等）· [`munder-fleet-c`](../munder-fleet-c)（自研对齐） |
+| 姊妹仓（含 [`munder-fleet-d`](../munder-fleet-d)） | [`munder-fleet-b`](../munder-fleet-b)（中等）· [`munder-fleet-c`](../munder-fleet-c)（自研对齐） |
 | 上游对照 | [iOfficeAI/AionCore](https://github.com/iOfficeAI/AionCore) · [iOfficeAI/AionUi](https://github.com/iOfficeAI/AionUi) · [multica-ai/multica](https://github.com/multica-ai/multica) · [vega0707/munder-difflin](https://github.com/vega0707/munder-difflin) |
 | 状态 | Scaffold / 交接就绪 · 尚未合并上游代码 |
 

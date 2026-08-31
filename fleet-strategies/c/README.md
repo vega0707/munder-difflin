@@ -7,7 +7,7 @@
 | | |
 |--|--|
 | 策略代号 | **C** |
-| 姊妹仓 | [`munder-fleet-a`](../munder-fleet-a) · [`munder-fleet-b`](../munder-fleet-b) |
+| 姊妹仓（含 [`munder-fleet-d`](../munder-fleet-d)） | [`munder-fleet-a`](../munder-fleet-a) · [`munder-fleet-b`](../munder-fleet-b) |
 | 状态 | Scaffold / 规格仓优先 |
 
 ## 你要做什么

@@ -7,7 +7,7 @@
 | | |
 |--|--|
 | 策略代号 | **B** |
-| 姊妹仓 | [`munder-fleet-a`](../munder-fleet-a) · [`munder-fleet-c`](../munder-fleet-c) |
+| 姊妹仓（含 [`munder-fleet-d`](../munder-fleet-d)） | [`munder-fleet-a`](../munder-fleet-a) · [`munder-fleet-c`](../munder-fleet-c) |
 | 主实现栈 | Electron · React · Node（延续 munder-difflin） |
 | 状态 | Scaffold / 交接就绪 |
 
