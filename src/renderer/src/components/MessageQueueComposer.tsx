@@ -561,9 +561,19 @@ function QueuedMessageRow(
 function FreeFlowButton({ agentId, hasGroqKey }: { agentId: string; hasGroqKey: boolean }) {
   const { t } = useTranslation();
   const ff = useFreeflow();
+  const [freeflowProvider, setFreeflowProvider] = useState<'groq' | 'siliconflow' | 'ctrip' | undefined>();
   const mine = ff.targetAgentId === agentId;
   const recording = ff.status === 'recording' && mine;
   const transcribing = ff.status === 'transcribing' && mine;
+  const showLevelMeter = recording && (ff.level > 0 || freeflowProvider === 'ctrip');
+
+  useEffect(() => {
+    let alive = true;
+    window.cth.getConfig().then((c) => {
+      if (alive) setFreeflowProvider(c.freeflowProvider);
+    }).catch(() => { /* keep undefined — meter hides unless level > 0 */ });
+    return () => { alive = false; };
+  }, []);
   // Block while another agent's clip is recording/uploading (single recorder).
   const busyElsewhere = ff.status !== 'idle' && !mine;
   const noKey = !hasGroqKey;
@@ -631,7 +641,28 @@ function FreeFlowButton({ agentId, hasGroqKey }: { agentId: string; hasGroqKey: 
       {/* Wrap in a (non-disabled) span so the native tooltip still shows on hover
           even when the inner button is disabled — Chromium suppresses tooltips on
           a disabled <button> itself. */}
-      <span title={title} style={{ display: 'inline-flex' }}>
+      <span title={title} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+        {showLevelMeter && (
+          <span
+            aria-hidden
+            style={{
+              width: 40,
+              height: 4,
+              flexShrink: 0,
+              background: 'var(--cth-ink-100)',
+              boxShadow: 'inset 0 0 0 1px var(--cth-ink-300)',
+              overflow: 'hidden'
+            }}
+          >
+            <span style={{
+              display: 'block',
+              height: '100%',
+              width: `${Math.round(ff.level * 100)}%`,
+              background: 'var(--cth-coral)',
+              transition: 'width 50ms linear'
+            }} />
+          </span>
+        )}
         <PixelButton
           variant={recording ? 'destructive' : 'secondary'}
           size="sm"
