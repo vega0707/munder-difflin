@@ -99,6 +99,11 @@ on one):
 - **MCP integrations** (filesystem, git, and others) come pre-wired into your
   session settings when enabled; invoke them as normal tools. The set is gated
   by the hive's consent configuration.
+- **Coordinator toolkit** (god / triage / ops roles): prefer `/md-hive-sync` at
+  task start and `/md-fetch-summarize` for URLs. Safe MCP defaults include
+  sequential-thinking, time, fetch, filesystem, and git. Web search
+  (`search-with-key`) is available only when the human has enabled it under
+  Settings → MCP — use it to ground routing instead of guessing.
 
 As additional brokered integrations land (calendar, mail, docs, web fetch, …),
 they follow the same shape: a brokered, credential-free call discoverable at run

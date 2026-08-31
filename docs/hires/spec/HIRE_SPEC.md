@@ -82,6 +82,11 @@ text the agent will act on. That's exactly why import never skips the review ste
 - Serve manifests with `content-type: application/json` and permissive CORS if you want
   other galleries to embed them.
 - Galleries should link `homepage` back to the manifest's own card page.
+- **Coordinator roles** (triage, escalation, fleet ops, orchestration / “manager”
+  wording) should carry the shared coordinator kit from `src/shared/coordinatorKit.ts`:
+  skills `md-hive-sync` + `md-fetch-summarize`, safe MCP
+  `sequential-thinking` / `time` / `fetch` / `filesystem` / `git`, and consent-gated
+  `search-with-key`. Secret MCP is never auto-enabled — the import UI asks the human.
 
 ## Versioning
 
