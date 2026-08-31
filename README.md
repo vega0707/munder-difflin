@@ -210,6 +210,30 @@ npm run typecheck  # type-check the node (main/preload) and web (renderer) proje
 > If `node-pty` fails to load after an Electron upgrade, re-run `npm install` (the `postinstall` hook
 > runs `electron-rebuild` against the current Electron ABI).
 
+### Free Flow — Ctrip ASR (程小帮)
+
+Free Flow dictation can transcribe through the Ctrip 程小帮 ASR broker instead of Groq or SiliconFlow.
+The subscription token is read only from your shell environment — it is never written to disk or sent
+to the renderer.
+
+1. **Set the token** before launching the app (replace `…` with your subscription value from 程小帮):
+
+   ```bash
+   export CXB_ASR_TOKEN=…
+   npm run dev
+   ```
+
+2. **Corp network.** The broker lives at `xiaobang.ctripcorp.com`; you need VPN or office network
+   reachability. The token alone is not enough off the corp network.
+
+3. **Pick the provider.** Open **Settings → Voice** and choose **程小帮 (Ctrip ASR)**, or leave the
+   default Groq — when `CXB_ASR_TOKEN` is present at first launch, the app autoselects Ctrip once.
+
+4. **Dictate.** Hold **Option** (macOS) or the mic button in the composer to record; release to
+   transcribe and insert text into the queue composer.
+
+Groq and SiliconFlow remain available; only the Ctrip path records 16 kHz WAV locally.
+
 ## Architecture
 
 Two data planes feed one renderer:

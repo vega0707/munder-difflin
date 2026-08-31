@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- **Ctrip ASR for Free Flow dictation.** Export `CXB_ASR_TOKEN` in the environment (never
+  persisted); choose the 程小帮 provider in Settings → Voice or let it autoselect on boot when the
+  token is present. Hold **Option** or the mic button to dictate. Requires corp-network access to
+  `xiaobang.ctripcorp.com`.
+
 ## [0.5.0] — 2026-08-31
 
 **The release that turns one office into many floors.** You can keep several projects open as
