@@ -1318,7 +1318,8 @@ export class HiveManager {
       seatMcp
     );
     const sockPath = automationSocketPath();
-    const mcpScriptPath = this.browserBridgeMcpScriptPath();
+    const browserMcpScriptPath = this.browserBridgeMcpScriptPath();
+    const desktopMcpScriptPath = this.desktopControlMcpScriptPath();
     const appRoot = this.mcpAppRoot();
     const out: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {};
     for (const e of MCP_CATALOG) {
@@ -1332,7 +1333,8 @@ export class HiveManager {
       // Replace spawn placeholders at merge time.
       const args = e.spec.args.map((a) => {
         if (a === '<cwd>') return cwd;
-        if (a === '<mcp-browser-bridge>') return mcpScriptPath;
+        if (a === '<mcp-browser-bridge>') return browserMcpScriptPath;
+        if (a === '<mcp-desktop-control>') return desktopMcpScriptPath;
         return a;
       });
       let env: Record<string, string> | undefined;
@@ -1342,6 +1344,9 @@ export class HiveManager {
           env[key] = val === '<sock>' ? sockPath : val;
         }
         if (e.id === 'browser-bridge' && appRoot) {
+          env.MUNDER_APP_ROOT = appRoot;
+        }
+        if (e.id === 'desktop-control' && appRoot) {
           env.MUNDER_APP_ROOT = appRoot;
         }
       }
@@ -1356,12 +1361,21 @@ export class HiveManager {
 
   /** Absolute path to the bundled browser-bridge stdio MCP script. */
   private browserBridgeMcpScriptPath(): string {
+    return this.mcpScriptPath('browser-bridge');
+  }
+
+  /** Absolute path to the bundled desktop-control stdio MCP script. */
+  private desktopControlMcpScriptPath(): string {
+    return this.mcpScriptPath('desktop-control');
+  }
+
+  private mcpScriptPath(id: 'browser-bridge' | 'desktop-control'): string {
     const rt = this.runtimeInfo();
     if (rt?.packaged) {
-      return join(process.resourcesPath, 'mcp', 'browser-bridge', 'index.cjs');
+      return join(process.resourcesPath, 'mcp', id, 'index.cjs');
     }
     const appPath = rt?.appPath ?? process.cwd();
-    return join(appPath, 'resources', 'mcp', 'browser-bridge', 'index.cjs');
+    return join(appPath, 'resources', 'mcp', id, 'index.cjs');
   }
 
   /** App root for MCP child processes to resolve @modelcontextprotocol/sdk. */

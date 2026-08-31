@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { invokeBrowserTool, BridgeError } from './browserBridge';
+import { invokeDesktopTool, DesktopError } from './desktopControl';
 import type { BridgeErrorCode } from '../shared/browserBridgeProtocol';
 
 export interface AutomationRequest {
@@ -76,11 +77,14 @@ async function dispatch(req: AutomationRequest): Promise<AutomationResponse> {
   }
 
   if (req.service === 'desktop') {
-    return {
-      id,
-      ok: false,
-      error: { code: 'NOT_IMPLEMENTED', message: 'desktop control not implemented' }
-    };
+    try {
+      const result = await invokeDesktopTool(req.method, req.params ?? {});
+      return { id, ok: true, result };
+    } catch (err) {
+      const code = err instanceof DesktopError ? err.code : 'DESKTOP_UNAVAILABLE';
+      const message = err instanceof Error ? err.message : 'desktop tool failed';
+      return { id, ok: false, error: { code, message } };
+    }
   }
 
   try {

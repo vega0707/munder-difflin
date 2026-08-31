@@ -78,6 +78,8 @@ extraResources:
   # stdio MCP scripts (browser-bridge, desktop-control) — spawned by hive hookSettings.
   - from: resources/mcp/browser-bridge
     to: mcp/browser-bridge
+  - from: resources/mcp/desktop-control
+    to: mcp/desktop-control
 
 asarUnpack:
   - "**/node_modules/node-pty/**"

@@ -161,6 +161,18 @@ export const MCP_CATALOG: McpCatalogEntry[] = [
     },
     tier: 'write',
     defaultEnabled: false
+  },
+  {
+    id: 'desktop-control',
+    label: 'Desktop control',
+    description: 'Screenshot, pointer, and keyboard control of your desktop (full open access once enabled).',
+    spec: {
+      command: 'node',
+      args: ['<mcp-desktop-control>'],
+      env: { MUNDER_AUTOMATION_SOCK: '<sock>' }
+    },
+    tier: 'write',
+    defaultEnabled: false
   }
 ];
 
