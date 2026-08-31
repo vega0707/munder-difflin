@@ -228,10 +228,15 @@ export function useRestoreTeam(config?: HarnessConfig | null): RestoreTeamState 
     const check = (): void => {
       if (autoStarted || restoring || timer) return;
       if (!useStore.getState().restorableAgents.length) return;
+      // Wait for the god bootstrap to finish (ready or failed) so auto-restore
+      // cannot fill every concurrent slot before Boss clocks in.
+      const gs = useStore.getState().godStatus;
+      if (gs === 'booting') return;
       timer = setTimeout(() => {
         timer = null;
         if (autoStarted || restoring) return;
         if (!useStore.getState().restorableAgents.length) return;
+        if (useStore.getState().godStatus === 'booting') return;
         // Latch BEFORE the await so the other mount point's timer, which may
         // fire in this same tick, sees it.
         autoStarted = true;

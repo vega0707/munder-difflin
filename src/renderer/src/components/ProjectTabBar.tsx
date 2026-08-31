@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useStore } from '@/store/store';
 import { projectTabLabel, canDeleteProject } from '@shared/projectTypes';
 
@@ -26,6 +27,7 @@ const tabStyle = (active: boolean, degraded: boolean): CSSProperties => ({
 });
 
 export function ProjectTabBar({ onCreate, onActivate, onRequestDelete, onJoinFloor, error }: ProjectTabBarProps) {
+  const { t } = useTranslation();
   const projects = useStore((s) => s.projects);
   const activeProjectId = useStore((s) => s.activeProjectId);
   const canDelete = canDeleteProject(projects);
@@ -53,7 +55,7 @@ export function ProjectTabBar({ onCreate, onActivate, onRequestDelete, onJoinFlo
               <button
                 type="button"
                 onClick={() => onActivate(p.projectId)}
-                title={p.status === 'degraded' ? 'Hive folder is missing' : p.name}
+                title={p.status === 'degraded' ? t('projects.degradedTitle') : p.name}
                 style={tabStyle(active, p.status === 'degraded')}
               >
                 {projectTabLabel(p)}
@@ -61,7 +63,7 @@ export function ProjectTabBar({ onCreate, onActivate, onRequestDelete, onJoinFlo
               {canDelete && (
                 <button
                   type="button"
-                  aria-label={`Delete ${p.name}`}
+                  aria-label={t('projects.deleteAria', { name: p.name })}
                   onClick={() => onRequestDelete(p.projectId)}
                   style={{
                     border: 'none',
@@ -84,8 +86,8 @@ export function ProjectTabBar({ onCreate, onActivate, onRequestDelete, onJoinFlo
         type="button"
         className="cth-tip"
         onClick={onCreate}
-        data-tip="New project — pick a god"
-        aria-label="New project"
+        data-tip={t('projects.newTip')}
+        aria-label={t('projects.newAria')}
         style={{
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           width: 28, height: 28, padding: 0, flexShrink: 0,
@@ -103,8 +105,8 @@ export function ProjectTabBar({ onCreate, onActivate, onRequestDelete, onJoinFlo
             type="button"
             className="cth-tip"
             onClick={() => setJoinOpen((v) => !v)}
-            data-tip="Join a floor from the seat hub"
-            aria-label="Join floor from hub"
+            data-tip={t('projects.joinTip')}
+            aria-label={t('projects.joinAria')}
             style={{
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
               height: 28, padding: '0 8px', flexShrink: 0,
@@ -114,7 +116,7 @@ export function ProjectTabBar({ onCreate, onActivate, onRequestDelete, onJoinFlo
               color: 'var(--cth-ink-900)', fontSize: 11
             }}
           >
-            join
+            {t('projects.join')}
           </button>
           {joinOpen && (
             <div style={{
@@ -125,7 +127,7 @@ export function ProjectTabBar({ onCreate, onActivate, onRequestDelete, onJoinFlo
             }}>
               {floors.length === 0 ? (
                 <div style={{ fontSize: 11, color: 'var(--cth-ink-500)', padding: 6 }}>
-                  No other hub floors. Serve a hub in Settings → Connections, or paste a hub URL.
+                  {t('projects.noHubFloors')}
                 </div>
               ) : floors.map((f) => (
                 <button

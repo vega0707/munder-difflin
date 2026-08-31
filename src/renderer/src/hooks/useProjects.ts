@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useStore, flushRoster } from '@/store/store';
 import type { ProjectMeta } from '@shared/projectTypes';
 import { canDeleteProject } from '@shared/projectTypes';
@@ -27,6 +28,7 @@ export function useProjects(opts: {
   remove: (projectId: string) => Promise<boolean>;
   joinFloor: (projectId: string) => Promise<boolean>;
 } {
+  const { t } = useTranslation();
   const [switchError, setSwitchError] = useState<string | undefined>();
 
   useEffect(() => {
@@ -63,8 +65,8 @@ export function useProjects(opts: {
     const res = await window.cth.projectActivate(projectId);
     if (!res.ok) {
       setSwitchError(res.code === 'RESUME_LIMIT_REACHED'
-        ? 'This floor has too many agents to resume (max 5 running). Suspend another floor first.'
-        : (res.error || 'Could not switch project.'));
+        ? t('projects.resumeLimit')
+        : (res.error || t('projects.switchFailed')));
       return false;
     }
     useStore.getState().setActiveProjectId(projectId);
@@ -78,7 +80,7 @@ export function useProjects(opts: {
     flushRoster();
     const res = await window.cth.projectDelete(projectId);
     if (!res.ok) {
-      setSwitchError(res.error || 'Could not delete the project.');
+      setSwitchError(res.error || t('projects.deleteFailed'));
       return false;
     }
     const remaining = await window.cth.projectList();
@@ -93,7 +95,7 @@ export function useProjects(opts: {
     flushRoster();
     const res = await window.cth.seatImportFloor({ projectId });
     if (!res.ok) {
-      setSwitchError(res.error || 'Could not join that floor.');
+      setSwitchError(res.error || t('projects.joinFailed'));
       return false;
     }
     if (res.projects) useStore.getState().setProjectList(res.projects.map(asMeta));

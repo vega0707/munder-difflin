@@ -210,6 +210,8 @@ interface State {
   sidebarWidth: number;
   sidebarTab: SidebarTab;
   godStatus: GodStatus;
+  /** Last god spawn failure (SPAWN_LIMIT, missing CLI, …). Cleared on boot/success. */
+  godSpawnError: string | null;
   projects: ProjectMeta[];
   activeProjectId: string | null;
   setProjectList: (list: ProjectMeta[]) => void;
@@ -231,7 +233,10 @@ interface State {
    *  shown in the command center (interactive sessions don't expose billed $). */
   toolCounts: Record<string, number>;
   bumpToolCount: (id: string) => void;
-  setGodStatus: (status: GodStatus) => void;
+  setGodStatus: (status: GodStatus, error?: string | null) => void;
+  /** Bump to re-run the god bootstrap effect (retry after failure). */
+  godBootNonce: number;
+  retryGodBoot: () => void;
   select: (id: string) => void;
   updateAgent: (id: string, patch: Partial<Agent>) => void;
   /** Copy durable hive roles onto roster descriptions (and the reverse is a
@@ -704,6 +709,8 @@ export const useStore = create<State>((set, get) => ({
   sidebarWidth: initialSidebarWidth,
   sidebarTab: initialSidebarTab,
   godStatus: 'booting',
+  godSpawnError: null,
+  godBootNonce: 0,
   projects: [],
   activeProjectId: null,
   setProjectList: (list) => set({ projects: list }),
@@ -743,7 +750,15 @@ export const useStore = create<State>((set, get) => ({
   toolCounts: {},
   bumpToolCount: (id) =>
     set((s) => ({ toolCounts: { ...s.toolCounts, [id]: (s.toolCounts[id] ?? 0) + 1 } })),
-  setGodStatus: (status) => set({ godStatus: status }),
+  setGodStatus: (status, error) => set({
+    godStatus: status,
+    godSpawnError: status === 'failed' ? (error ?? null) : null
+  }),
+  retryGodBoot: () => set((s) => ({
+    godStatus: 'booting',
+    godSpawnError: null,
+    godBootNonce: s.godBootNonce + 1
+  })),
   select: (id) => set((s) => { persistAgents(s.agents, id); return { selectedId: id, ccTabRequest: null }; }),
   updateAgent: (id, patch) =>
     set((s) => {

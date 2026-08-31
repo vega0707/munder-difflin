@@ -1,4 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react';
+import { useTranslation } from 'react-i18next';
 import { PixelPanel } from './PixelPanel';
 import { PixelButton } from './PixelButton';
 import { SpritePortrait } from './SpritePortrait';
@@ -36,6 +37,7 @@ const inputStyle: CSSProperties = {
 };
 
 export function ProjectCreateDialog({ onClose, onCreated }: ProjectCreateDialogProps) {
+  const { t } = useTranslation();
   const [name, setName] = useState('');
   const [cwd, setCwd] = useState('');
   const [roles, setRoles] = useState<CreateProjectRole[]>([]);
@@ -56,9 +58,9 @@ export function ProjectCreateDialog({ onClose, onCreated }: ProjectCreateDialogP
 
   const applyTemplate = (id: string) => {
     setTemplateId(id);
-    const t = templates.find((x) => x.id === id);
-    if (!t) return;
-    setRoles(rolesFromTemplate(t));
+    const tmpl = templates.find((x) => x.id === id);
+    if (!tmpl) return;
+    setRoles(rolesFromTemplate(tmpl));
     setError(undefined);
   };
 
@@ -88,15 +90,15 @@ export function ProjectCreateDialog({ onClose, onCreated }: ProjectCreateDialogP
       });
       if (!res.ok) {
         setError(res.code === 'GOD_REQUIRED'
-          ? 'Pick at least one character to be the god.'
-          : (res.error || 'Could not create the project.'));
+          ? t('projects.godRequired')
+          : (res.error || t('projects.createFailed')));
         setBusy(false);
         return;
       }
-        onCreated?.(res.project.projectId);
-        useStore.getState().setActiveProjectId(res.project.projectId);
-        if ('roster' in res) useStore.getState().loadFloorFromRoster(res.roster);
-        onClose();
+      onCreated?.(res.project.projectId);
+      useStore.getState().setActiveProjectId(res.project.projectId);
+      if ('roster' in res) useStore.getState().loadFloorFromRoster(res.roster);
+      onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setBusy(false);
@@ -111,12 +113,10 @@ export function ProjectCreateDialog({ onClose, onCreated }: ProjectCreateDialogP
       padding: 24
     }}>
       <div style={{ width: 560, maxWidth: '94vw', maxHeight: '90vh', overflow: 'auto' }}>
-        <PixelPanel variant="dialog" title="NEW PROJECT" noPadding>
+        <PixelPanel variant="dialog" title={t('projects.createTitle')} noPadding>
           <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
             <p style={{ margin: 0, fontSize: 13, lineHeight: '20px', color: 'var(--cth-ink-700)' }}>
-              A project is its own floor. You have to pick at least one character
-              as the <strong>god</strong> — that person runs the floor. Extra
-              characters join as workers.
+              {t('projects.createBlurb')}
             </p>
 
             {templates.length > 0 && (
@@ -153,27 +153,29 @@ export function ProjectCreateDialog({ onClose, onCreated }: ProjectCreateDialogP
             )}
 
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
-              Project name
+              {t('projects.nameLabel')}
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Acme checkout"
+                placeholder={t('projects.namePlaceholder')}
                 style={inputStyle}
               />
             </label>
 
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
-              Default folder (optional)
+              {t('projects.cwdLabel')}
               <div style={{ display: 'flex', gap: 8 }}>
-                <input value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder="~/src/acme" style={inputStyle} />
-                <PixelButton size="sm" onClick={() => void browse()}>Browse</PixelButton>
+                <input value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder={t('projects.cwdPlaceholder')} style={inputStyle} />
+                <PixelButton size="sm" onClick={() => void browse()}>{t('projects.browse')}</PixelButton>
               </div>
             </label>
 
             <div>
               <div style={{ fontSize: 12, marginBottom: 6 }}>
-                Who is on the floor? Mark one as god.
-                {god ? ` God: ${OFFICE_CAST.find((c) => c.name === god.character)?.displayName}.` : ' Nobody is god yet.'}
+                {t('projects.castLabel')}
+                {god
+                  ? t('projects.castGod', { name: OFFICE_CAST.find((c) => c.name === god.character)?.displayName })
+                  : t('projects.castNoGod')}
               </div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {OFFICE_CAST.map((c) => {
@@ -217,11 +219,11 @@ export function ProjectCreateDialog({ onClose, onCreated }: ProjectCreateDialogP
                             fontSize: 10, color: 'var(--cth-ink-500)', padding: 0
                           }}
                         >
-                          make god
+                          {t('projects.makeGod')}
                         </button>
                       )}
                       {isGod && (
-                        <span style={{ fontSize: 10, color: 'var(--cth-ink-900)' }}>god</span>
+                        <span style={{ fontSize: 10, color: 'var(--cth-ink-900)' }}>{t('projects.godBadge')}</span>
                       )}
                     </div>
                   );
@@ -237,7 +239,7 @@ export function ProjectCreateDialog({ onClose, onCreated }: ProjectCreateDialogP
               <input
                 value={saveName}
                 onChange={(e) => setSaveName(e.target.value)}
-                placeholder="Save these roles as a template…"
+                placeholder={t('projects.saveTemplatePlaceholder')}
                 style={{ ...inputStyle, flex: 1 }}
                 disabled={!canSubmitCreateProject(roles)}
               />
@@ -261,9 +263,9 @@ export function ProjectCreateDialog({ onClose, onCreated }: ProjectCreateDialogP
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <PixelButton onClick={onClose} disabled={busy}>Cancel</PixelButton>
+              <PixelButton onClick={onClose} disabled={busy}>{t('common.cancel')}</PixelButton>
               <PixelButton variant="primary" onClick={() => void submit()} disabled={!ready || busy}>
-                {busy ? 'Creating…' : 'Create project'}
+                {busy ? t('projects.creating') : t('projects.create')}
               </PixelButton>
             </div>
           </div>

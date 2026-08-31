@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { PixelPanel } from './PixelPanel';
 import { PixelButton } from './PixelButton';
 import { useStore } from '@/store/store';
@@ -9,8 +10,9 @@ export interface ProjectDeleteDialogProps {
 }
 
 export function ProjectDeleteDialog({ projectId, onClose, onConfirm }: ProjectDeleteDialogProps) {
+  const { t } = useTranslation();
   const project = useStore((s) => s.projects.find((p) => p.projectId === projectId));
-  const name = project?.name ?? 'this project';
+  const name = project?.name ?? t('projects.thisProject');
 
   return (
     <div style={{
@@ -20,17 +22,15 @@ export function ProjectDeleteDialog({ projectId, onClose, onConfirm }: ProjectDe
       padding: 24
     }}>
       <div style={{ width: 420, maxWidth: '94vw' }}>
-        <PixelPanel variant="dialog" title="DELETE PROJECT" noPadding>
+        <PixelPanel variant="dialog" title={t('projects.deleteTitle')} noPadding>
           <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
             <p style={{ margin: 0, fontSize: 13, lineHeight: '20px', color: 'var(--cth-ink-700)' }}>
-              Delete <strong>{name}</strong>? The floor, hive, and roster for this
-              project will be removed. Other projects stay put. You cannot delete
-              the last project.
+              {t('projects.deleteBody', { name })}
             </p>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <PixelButton onClick={onClose}>Cancel</PixelButton>
+              <PixelButton onClick={onClose}>{t('common.cancel')}</PixelButton>
               <PixelButton variant="destructive" onClick={() => onConfirm(projectId)}>
-                Delete
+                {t('common.delete')}
               </PixelButton>
             </div>
           </div>

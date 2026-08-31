@@ -2849,7 +2849,11 @@ async function spawnAgentCore(opts: AgentSpawnOptions, owner: Electron.WebConten
     analytics.track('agent_spawned', { provider });
     return { ok: true, cwd: opts.cwd, builtin: true };
   }
-  if (ptyManager.getActivePtyCount() >= MAX_ACTIVE_AGENTS) {
+  // God must always be able to clock in. Auto-restore can fill all 5 worker
+  // slots before the orchestrator finishes booting; without this exemption the
+  // floor ends up with employees and no Boss, and the UI just shows "empty".
+  const spawningGod = opts.hive?.isGod === true;
+  if (!spawningGod && ptyManager.getActivePtyCount() >= MAX_ACTIVE_AGENTS) {
     return { ok: false, error: 'SPAWN_LIMIT_REACHED', code: 'SPAWN_LIMIT_REACHED' } as { ok: boolean; error?: string };
   }
   // Activation-funnel entry (v0.4.6): every spawn REQUEST, so (attempted − spawned)

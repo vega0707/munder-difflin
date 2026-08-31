@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useStore, selectedAgent } from '@/store/store';
 import { startMockLoop, stopMockLoop } from '@/store/mockEvents';
 import type { HarnessConfig } from '@/store/config';
@@ -50,11 +51,15 @@ export function App() {
   const agent = useStore(selectedAgent);
   const agents = useStore(s => s.agents);
   const agentCount = agents.length;
+  const hasGod = agents.some((a) => a.isGod);
   const bootingGodName = useResolvedGodName();
   const addAgentOpen = useStore(s => s.addAgentOpen);
   const setAddAgentOpen = useStore(s => s.setAddAgentOpen);
   const clearPendingHires = useStore(s => s.clearPendingHires);
   const godStatus = useStore(s => s.godStatus);
+  const godSpawnError = useStore(s => s.godSpawnError);
+  const retryGodBoot = useStore(s => s.retryGodBoot);
+  const { t } = useTranslation();
   const fullscreenAgentId = useStore(s => s.fullscreenAgentId);
   const appThemeNow = useAppTheme();
   const sidebarWidth = useStore(s => s.sidebarWidth);
@@ -423,22 +428,47 @@ export function App() {
         <div style={{ flex: 1, minHeight: 0, minWidth: 0, position: 'relative' }}>
           <OfficeFloor />
           <MemoryPanel />
+          {!hasGod && (godStatus === 'failed' || agentCount > 0) && (
+            <div style={{
+              position: 'absolute', inset: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              pointerEvents: 'none', zIndex: 5
+            }}>
+              <div style={{ pointerEvents: 'auto', width: 400 }}>
+                <PixelPanel variant="dialog" title={t('projects.godMissingTitle')} noPadding>
+                  <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <p style={{ margin: 0, fontSize: 13, lineHeight: '20px' }}>
+                      {t('projects.godMissingBody')}
+                    </p>
+                    {godSpawnError && (
+                      <p style={{ margin: 0, fontSize: 12, lineHeight: '18px', color: 'var(--cth-coral-700)' }}>
+                        {t('projects.godMissingReason', { reason: godSpawnError })}
+                      </p>
+                    )}
+                    <PixelButton variant="primary" size="md" onClick={() => retryGodBoot()}>
+                      {t('projects.godRetry')}
+                    </PixelButton>
+                  </div>
+                </PixelPanel>
+              </div>
+            </div>
+          )}
           {agentCount === 0 && godStatus === 'booting' && <MichaelBooting />}
-          {agentCount === 0 && godStatus !== 'booting' && (
+          {agentCount === 0 && godStatus === 'ready' && hasGod && (
             <div style={{
               position: 'absolute', inset: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               pointerEvents: 'none'
             }}>
               <div style={{ pointerEvents: 'auto', width: 360 }}>
-                <PixelPanel variant="dialog" title="EMPTY FLOOR" noPadding>
+                <PixelPanel variant="dialog" title={t('projects.emptyTitle')} noPadding>
                   <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
                     <p style={{ margin: 0, fontSize: 13, lineHeight: '20px' }}>
-                      No agents on the floor yet. Spawn one to see real claude output stream in here.
+                      {t('projects.emptyBody')}
                     </p>
                     <PixelButton variant="primary" size="md" onClick={() => setAddAgentOpen(true)}>
                       <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-                        <Icon name="plus" /> add agent
+                        <Icon name="plus" /> {t('common.add')}
                       </span>
                     </PixelButton>
                   </div>

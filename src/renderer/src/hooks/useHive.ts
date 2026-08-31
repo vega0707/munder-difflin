@@ -406,14 +406,15 @@ export function useHive(config: HarnessConfig | null): void {
 
   // 1) Bootstrap the god agent (source of truth = live PTYs, to dodge restarts).
   const activeProjectId = useStore((s) => s.activeProjectId);
+  const projectsReady = useStore((s) => s.projects.length > 0);
+  const godBootNonce = useStore((s) => s.godBootNonce);
   useEffect(() => {
-    if (!config?.onboardingComplete || !config.harnessHome || !activeProjectId) return;
+    if (!config?.onboardingComplete || !config.harnessHome || !activeProjectId || !projectsReady) return;
     const project = useStore.getState().projects.find((p) => p.projectId === activeProjectId);
     if (!project || project.status === 'degraded') return;
     let cancelled = false;
     godSpawning.current = false;
     useStore.getState().setGodStatus('booting');
-    const godCwd = project.defaultCwd?.trim() || project.hiveRootPath.replace(/[/\\]hive[/\\]?$/, '') || config.harnessHome;
     const godCharacter = (project.godCharacter || 'michael') as OfficeCharacterName;
     const t = setTimeout(async () => {
       if (cancelled) return;
@@ -422,6 +423,11 @@ export function useHive(config: HarnessConfig | null): void {
       const godId = currentGodId(reg);
       const godPty = godPtyIdFor(activeProjectId, godId);
       if (live.some((p) => p.id === godPty)) {
+        if (!cancelled) useStore.getState().setGodStatus('ready');
+        return;
+      }
+      // Already on the floor from roster/localStorage — don't tear down and respawn.
+      if (useStore.getState().agents.some((a) => a.id === godId && a.isGod)) {
         if (!cancelled) useStore.getState().setGodStatus('ready');
         return;
       }
@@ -434,6 +440,11 @@ export function useHive(config: HarnessConfig | null): void {
         (reg?.agents?.[godId]?.provider as AgentProvider | undefined) ?? config.godProvider
       );
       const godModel = config.godModel;
+      const registryCwd = reg?.agents?.[godId]?.cwd;
+      const godCwd = (typeof registryCwd === 'string' && registryCwd.trim())
+        || project.defaultCwd?.trim()
+        || project.hiveRootPath.replace(/[/\\]hive[/\\]?$/, '')
+        || config.harnessHome;
       const command = providerNeedsPty(godProvider)
         ? buildSpawnCommand(config, godModel, godProvider)
         : 'builtin';
@@ -451,7 +462,13 @@ export function useHive(config: HarnessConfig | null): void {
         hive: { id: godId, name: godName, provider: godProvider, cwd: godCwd, isGod: true, role: 'orchestrator (god)' }
       });
       if (cancelled) { godSpawning.current = false; return; }
-      if (!res.ok) { godSpawning.current = false; useStore.getState().setGodStatus('failed'); return; }
+      if (!res.ok) {
+        godSpawning.current = false;
+        const reason = res.error || res.code || 'spawn failed';
+        console.error('[useHive] god spawn failed:', reason, { projectId: activeProjectId, godPty, godProvider });
+        useStore.getState().setGodStatus('failed', reason);
+        return;
+      }
       const god: Agent = {
         id: godId,
         name: godName,
@@ -493,7 +510,7 @@ export function useHive(config: HarnessConfig | null): void {
       })();
     }, 1200);
     return () => { cancelled = true; clearTimeout(t); };
-  }, [config?.onboardingComplete, config?.harnessHome, activeProjectId]);
+  }, [config?.onboardingComplete, config?.harnessHome, activeProjectId, godBootNonce, projectsReady]);
 
   // 2) Drive avatars from real hook events emitted by each agent's shim.
   useEffect(() => {
