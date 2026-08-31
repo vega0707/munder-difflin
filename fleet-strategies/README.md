@@ -18,6 +18,9 @@
 
 每仓：`README.md` → `docs/HANDOFF.md` → `docs/COPY_MAP.md`（D 另读 `LICENSE_NOTES.md`）。
 
+**派给其他 Agent 的提示词：** [`AGENT_PROMPTS.md`](./AGENT_PROMPTS.md)  
+**有 push 权限时一键灌仓：** `./fleet-strategies/scripts/seed-strategy-repo.sh a`（b/c/d 同理）
+
 ## 已拍板（跨仓）
 
 1. 本地是分布式单节点，**不要**双模式开关  
