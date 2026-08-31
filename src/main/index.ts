@@ -71,7 +71,7 @@ import {
 import {
   appendTriggerHistory, clearTriggerHistory, listTriggerHistory, updateTriggerHistory
 } from './triggerHistory';
-import { transcribeWithGroq } from './freeflow';
+import { readCxbAsrToken, shouldAutoselectCtrip, transcribeWithCtrip, transcribeWithGroq } from './freeflow';
 import { resolveSttProvider, isSttProviderId } from '../shared/sttProviders';
 import { registerRealtimeIpc } from './realtime';
 import { registerRealtimeActionIpc } from './realtimeActions';
@@ -5032,6 +5032,11 @@ ipcMain.handle('freeflow:setConfig', (_evt, patch: unknown) => {
   return { ok: true };
 });
 
+/** Whether CXB_ASR_TOKEN is set in main's environment (never returns the token). */
+ipcMain.handle('freeflow:ctripTokenPresent', () => {
+  return { present: !!readCxbAsrToken() };
+});
+
 /** Transcribe one captured audio clip via the selected STT host. Gated on the
  *  flag + a key being present, so a disabled feature can NEVER reach the network.
  *  The key stays in main — only the audio bytes cross IPC inbound and the
@@ -5039,20 +5044,36 @@ ipcMain.handle('freeflow:setConfig', (_evt, patch: unknown) => {
 ipcMain.handle('freeflow:transcribe', async (_evt, arg: unknown) => {
   const cfg = readConfig();
   if (!cfg.freeflowEnabled) return { ok: false, error: 'Free Flow is disabled' };
-  if (!cfg.groqApiKey) return { ok: false, error: 'no STT API key set' };
   const a = (arg ?? {}) as { audio?: unknown; mimeType?: unknown; filename?: unknown; language?: unknown };
   if (!(a.audio instanceof ArrayBuffer) && !(a.audio instanceof Uint8Array)) {
     return { ok: false, error: 'no audio' };
   }
   const stt = resolveSttProvider(cfg.freeflowProvider);
+  const language = typeof a.language === 'string' && a.language ? a.language : undefined;
+  const mimeType = typeof a.mimeType === 'string' ? a.mimeType : undefined;
+
+  if (stt.id === 'ctrip') {
+    const token = readCxbAsrToken();
+    if (!token) return { ok: false, error: 'set CXB_ASR_TOKEN environment variable' };
+    const out = await transcribeWithCtrip({
+      apiKey: token,
+      audio: a.audio,
+      mimeType,
+      language
+    });
+    if (out.ok) analytics.trackFeature('voice_dictation');
+    return out;
+  }
+
+  if (!cfg.groqApiKey) return { ok: false, error: 'no STT API key set' };
   const out = await transcribeWithGroq({
     apiKey: cfg.groqApiKey,
     audio: a.audio,
-    mimeType: typeof a.mimeType === 'string' ? a.mimeType : undefined,
+    mimeType,
     filename: typeof a.filename === 'string' ? a.filename : undefined,
     model: cfg.freeflowModel || stt.defaultModel,
     endpoint: stt.endpoint,
-    language: typeof a.language === 'string' && a.language ? a.language : undefined
+    language
   });
   if (out.ok) analytics.trackFeature('voice_dictation');
   return out;
@@ -5938,6 +5959,16 @@ app.whenReady().then(() => {
   // live session. Force it closed at startup (a real session re-opens it via
   // setMicGate(true)); macOS TCC stays a second gate regardless.
   if (readConfig().realtimeVoiceEnabled) writeConfig({ realtimeVoiceEnabled: false });
+
+  // One-time Ctrip ASR bootstrap: when CXB_ASR_TOKEN is present and the user
+  // has not picked another STT backend, default Free Flow to the corp broker.
+  {
+    const cfg = readConfig();
+    const tokenPresent = !!readCxbAsrToken();
+    if (shouldAutoselectCtrip(cfg, tokenPresent)) {
+      writeConfig({ freeflowProvider: 'ctrip', freeflowCtripAutoselected: true });
+    }
+  }
 
   // Anonymous product analytics (PostHog) — the full contract lives in
   // TELEMETRY.md. No-op unless a build-time key was injected (official releases

@@ -53,6 +53,20 @@ export function readCxbAsrToken(env?: NodeJS.ProcessEnv): string | undefined {
   return token || undefined;
 }
 
+export interface CtripAutoselectConfig {
+  freeflowProvider?: 'groq' | 'siliconflow' | 'ctrip' | null;
+  freeflowCtripAutoselected?: boolean;
+}
+
+/** One-time bootstrap: pick Ctrip when CXB_ASR_TOKEN is present and the user
+ *  has not explicitly chosen another STT backend (or is still on the Groq default). */
+export function shouldAutoselectCtrip(cfg: CtripAutoselectConfig, tokenPresent: boolean): boolean {
+  if (!tokenPresent) return false;
+  if (cfg.freeflowCtripAutoselected) return false;
+  const provider = cfg.freeflowProvider;
+  return provider == null || provider === 'groq';
+}
+
 export interface TranscribeOptions {
   /** User's Groq API key. Used only for the Authorization header; never logged. */
   apiKey: string;

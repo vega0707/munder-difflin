@@ -108,7 +108,8 @@ export interface HarnessConfig {
   /** Free Flow voice dictation (mirrors src/main/config.ts). */
   freeflowEnabled?: boolean;
   groqApiKey?: string;
-  freeflowProvider?: 'groq' | 'siliconflow';
+  freeflowProvider?: 'groq' | 'siliconflow' | 'ctrip';
+  freeflowCtripAutoselected?: boolean;
   freeflowModel?: string;
   /** Realtime voice idle auto-disconnect (ms); default 180000 (3 min), 0 = never.
    *  Tuned in Settings → Realtime Michael; the cost cap stays the runaway guard. */

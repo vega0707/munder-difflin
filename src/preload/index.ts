@@ -303,7 +303,8 @@ export interface HarnessConfig {
    *  Entry point B (hold-Option-to-talk) is handled in the renderer, no hotkey. */
   freeflowEnabled?: boolean;
   groqApiKey?: string;
-  freeflowProvider?: 'groq' | 'siliconflow';
+  freeflowProvider?: 'groq' | 'siliconflow' | 'ctrip';
+  freeflowCtripAutoselected?: boolean;
   freeflowModel?: string;
   /** Realtime Michael voice loop — true ONLY while a session holds the mic
    *  (renderer session sets it at start()/stop()); the main mic permission gate
@@ -1445,7 +1446,7 @@ const api = {
   /** Persist Free Flow settings (flag / Groq key / model). The Groq key is stored
    *  in main config; entry point B (hold-Option) is renderer-side, no hotkey here. */
   freeflowSetConfig: (patch: {
-    enabled?: boolean; apiKey?: string; model?: string; provider?: 'groq' | 'siliconflow';
+    enabled?: boolean; apiKey?: string; model?: string; provider?: 'groq' | 'siliconflow' | 'ctrip';
   }): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke('freeflow:setConfig', patch),
   /** Transcribe one captured audio clip via Groq (the key stays in main; only the
@@ -1454,6 +1455,9 @@ const api = {
     audio: ArrayBuffer | Uint8Array; mimeType?: string; filename?: string; language?: string;
   }): Promise<{ ok: boolean; text?: string; error?: string }> =>
     ipcRenderer.invoke('freeflow:transcribe', arg),
+  /** Whether CXB_ASR_TOKEN is set in the main process environment (never returns the token). */
+  freeflowCtripTokenPresent: (): Promise<{ present: boolean }> =>
+    ipcRenderer.invoke('freeflow:ctripTokenPresent'),
 
   // ─── Integrations registry (Phase 2 — labeled REST endpoints via the secret broker) ──
   // Bridges the §6 IPC surface for the Settings UI. WRITE-ONLY secret contract end to

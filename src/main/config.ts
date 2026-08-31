@@ -354,8 +354,11 @@ export interface HarnessConfig {
    *  crosses IPC for the request. Treated like `slackBotToken`. */
   groqApiKey?: string;
   /** STT backend for Free Flow. Default groq (original path). `siliconflow`
-   *  is the China-reachable SenseVoice host. */
-  freeflowProvider?: 'groq' | 'siliconflow';
+   *  is the China-reachable SenseVoice host; `ctrip` uses CXB_ASR_TOKEN env. */
+  freeflowProvider?: 'groq' | 'siliconflow' | 'ctrip';
+  /** Set once when main autoselects Ctrip on boot (CXB_ASR_TOKEN present). Prevents
+   *  re-flipping after the user manually picks another provider. */
+  freeflowCtripAutoselected?: boolean;
   /** Groq Whisper / SenseVoice model id. Default follows the selected provider. */
   freeflowModel?: string;
 
