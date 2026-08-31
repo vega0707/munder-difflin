@@ -30,6 +30,29 @@ const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 /** Don't let a hung request wedge the feature — bound the call. */
 const REQUEST_TIMEOUT_MS = 60_000;
 
+/** Ctrip 程小帮 broker ASR endpoint (hardcoded corp URL). */
+export const CTRIP_ASR_URL =
+  'http://xiaobang.ctripcorp.com/api/chengxiaobang/tools/asr';
+export const CTRIP_ASR_TIMEOUT_MS = 60_000;
+/** ~10 MB raw audio cap expressed as max base64 payload length. */
+export const CTRIP_MAX_AUDIO_BASE64_LENGTH = Math.ceil((10 * 1024 * 1024) / 3) * 4;
+
+export interface CtripTranscribeOptions {
+  /** CXB_ASR_TOKEN value. Used only for Authorization; never logged. */
+  apiKey: string;
+  audio: ArrayBuffer | Uint8Array | Buffer;
+  /** Defaults to 'audio/wav'. */
+  mimeType?: string;
+  /** Defaults to 'zh'. */
+  language?: string;
+}
+
+/** Read CXB_ASR_TOKEN from env (trimmed). Main-only; never persisted. */
+export function readCxbAsrToken(env?: NodeJS.ProcessEnv): string | undefined {
+  const token = (env ?? process.env).CXB_ASR_TOKEN?.trim();
+  return token || undefined;
+}
+
 export interface TranscribeOptions {
   /** User's Groq API key. Used only for the Authorization header; never logged. */
   apiKey: string;
@@ -110,6 +133,75 @@ export async function transcribeWithGroq(opts: TranscribeOptions): Promise<Trans
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Transcribe via Ctrip 程小帮 JSON ASR broker. Resolves `{ ok, text }` on success
+ * or `{ ok: false, error }` otherwise. Never throws; never logs the token.
+ */
+export async function transcribeWithCtrip(opts: CtripTranscribeOptions): Promise<TranscribeResult> {
+  if (!opts.apiKey) {
+    return { ok: false, error: 'set CXB_ASR_TOKEN environment variable' };
+  }
+
+  const bytes = toUint8Array(opts.audio);
+  if (bytes.byteLength === 0) return { ok: false, error: 'empty audio' };
+
+  const audioBase64 = Buffer.from(bytes).toString('base64');
+  if (audioBase64.length > CTRIP_MAX_AUDIO_BASE64_LENGTH) {
+    return { ok: false, error: 'audio too large (Ctrip cap is ~10 MB)' };
+  }
+
+  const mimeType = opts.mimeType || 'audio/wav';
+  const language = opts.language || 'zh';
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CTRIP_ASR_TIMEOUT_MS);
+  try {
+    const res = await fetch(CTRIP_ASR_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${opts.apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ audio: audioBase64, mimeType, language }),
+      signal: controller.signal
+    });
+    const raw = await res.text();
+    if (res.status === 401) {
+      return { ok: false, error: 'check CXB_ASR_TOKEN (HTTP 401 Unauthorized)' };
+    }
+    if (!res.ok) {
+      return { ok: false, error: `Ctrip ASR ${res.status}: ${extractCtripError(raw) || res.statusText}` };
+    }
+    let json: { success?: boolean; text?: unknown; message?: string };
+    try {
+      json = JSON.parse(raw) as typeof json;
+    } catch {
+      return { ok: false, error: 'invalid Ctrip ASR response' };
+    }
+    if (json.success === false) {
+      const msg = json.message?.trim() || 'Ctrip ASR request failed';
+      return { ok: false, error: msg };
+    }
+    const text = typeof json.text === 'string' ? json.text.trim() : '';
+    if (!text) return { ok: false, error: 'no speech detected' };
+    return { ok: true, text };
+  } catch (e) {
+    const aborted = e instanceof Error && e.name === 'AbortError';
+    return { ok: false, error: aborted ? 'transcription timed out' : errMsg(e) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function extractCtripError(raw: string): string {
+  try {
+    const j = JSON.parse(raw) as { message?: string; error?: string };
+    if (typeof j.message === 'string') return j.message;
+    if (typeof j.error === 'string') return j.error;
+  } catch { /* not json */ }
+  return '';
 }
 
 /** Pull a human-readable message out of Groq's JSON error envelope, if present. */
