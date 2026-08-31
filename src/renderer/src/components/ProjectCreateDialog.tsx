@@ -210,6 +210,15 @@ export function ProjectCreateDialog({ onClose, onCreated }: ProjectCreateDialogP
                           <SpritePortrait character={c.name} scale={2} />
                         </div>
                         <span style={{ fontSize: 11, color: 'var(--cth-ink-700)' }}>{c.displayName}</span>
+                        {selected?.title && (
+                          <span style={{
+                            fontSize: 9, lineHeight: '11px', color: 'var(--cth-ink-500)',
+                            textAlign: 'center', maxWidth: 52, overflow: 'hidden',
+                            textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                          }} title={selected.description || selected.title}>
+                            {selected.title}
+                          </span>
+                        )}
                       </button>
                       {selected && !isGod && (
                         <button

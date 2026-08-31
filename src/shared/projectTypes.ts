@@ -13,7 +13,17 @@ export interface ProjectMeta {
   godCharacter: OfficeCharacterName;
 }
 
+/** Default global live-PTY cap (all projects). Overridden by `config.maxActiveAgents`. */
 export const MAX_ACTIVE_AGENTS = 5;
+export const MIN_MAX_ACTIVE_AGENTS = 1;
+export const ABS_MAX_ACTIVE_AGENTS = 32;
+
+/** Clamp a user/config live-slot value to the supported range. */
+export function resolveMaxActiveAgents(raw: unknown): number {
+  const n = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : NaN;
+  if (!Number.isFinite(n)) return MAX_ACTIVE_AGENTS;
+  return Math.min(ABS_MAX_ACTIVE_AGENTS, Math.max(MIN_MAX_ACTIVE_AGENTS, Math.floor(n)));
+}
 
 /** Stable id of the hive migrated out of `<harnessHome>/hive`. */
 export const DEFAULT_PROJECT_ID = 'default';
@@ -49,6 +59,13 @@ export const PROJECT_CHANNELS = {
   DELETE_TEMPLATE: 'project:deleteTemplate',
   CHANGED: 'project:changed',
   ACTIVE_CHANGED: 'project:active-changed'
+} as const;
+
+export const ROLE_CHANNELS = {
+  LIST: 'role:list',
+  SAVE: 'role:save',
+  DELETE: 'role:delete',
+  PROPOSE: 'role:proposeFromBrief'
 } as const;
 
 export const SEAT_CHANNELS = {
@@ -109,12 +126,42 @@ export const OFFICE_CHARACTER_DISPLAY: Record<OfficeCharacterName, string> = {
 export interface CreateProjectRole {
   character: OfficeCharacterName;
   asGod?: boolean;
+  /** Job title shown on the floor (e.g. 产品经理). Cast display name stays Jim/Pam/… */
+  title?: string;
+  /** Short duty blurb for hive role / roster description. */
+  description?: string;
+  /** Phase 2 — skill ids for this seat (accepted now, injected later). */
+  skills?: string[];
+  /** Phase 2 — MCP catalog ids for this seat (accepted now, injected later). */
+  mcp?: string[];
 }
 
 export interface ParsedCreateProjectRoles {
   godCharacter: OfficeCharacterName;
   godName: string;
   extraCharacters: OfficeCharacterName[];
+  /** Normalized roles including god, with titles/descriptions preserved. */
+  roles: CreateProjectRole[];
+}
+
+function optionalStringList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out = value.filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+    .map((x) => x.trim());
+  return out.length ? out : undefined;
+}
+
+function normalizeRoleFields(raw: Record<string, unknown>, character: OfficeCharacterName, asGod: boolean): CreateProjectRole {
+  const title = typeof raw.title === 'string' ? raw.title.trim().slice(0, 80) : '';
+  const description = typeof raw.description === 'string' ? raw.description.trim().slice(0, 280) : '';
+  const skills = optionalStringList(raw.skills);
+  const mcp = optionalStringList(raw.mcp);
+  const role: CreateProjectRole = { character, asGod };
+  if (title) role.title = title;
+  if (description) role.description = description;
+  if (skills) role.skills = skills;
+  if (mcp) role.mcp = mcp;
+  return role;
 }
 
 export class ProjectCreateError extends Error {
@@ -136,14 +183,18 @@ export function assertCreateProjectRoles(roles: unknown): ParsedCreateProjectRol
   const parsed: CreateProjectRole[] = [];
   const seen = new Set<string>();
   for (const raw of roles) {
-    const character = raw && typeof raw === 'object' ? (raw as { character?: unknown }).character : undefined;
-    const asGod = raw && typeof raw === 'object' ? Boolean((raw as { asGod?: unknown }).asGod) : false;
+    if (!raw || typeof raw !== 'object') {
+      throw new ProjectCreateError('GOD_REQUIRED', 'pick at least one role as god');
+    }
+    const row = raw as Record<string, unknown>;
+    const character = row.character;
+    const asGod = Boolean(row.asGod);
     if (!isOfficeCharacter(character)) {
       throw new ProjectCreateError('GOD_REQUIRED', 'pick at least one role as god');
     }
     if (seen.has(character)) continue;
     seen.add(character);
-    parsed.push({ character, asGod });
+    parsed.push(normalizeRoleFields(row, character, asGod));
   }
   if (parsed.length === 0) {
     throw new ProjectCreateError('GOD_REQUIRED', 'pick at least one role as god');
@@ -156,10 +207,15 @@ export function assertCreateProjectRoles(roles: unknown): ParsedCreateProjectRol
     throw new ProjectCreateError('TOO_MANY_GODS', 'a project has one god');
   }
   const godCharacter = gods[0].character;
+  const ordered = [
+    parsed.find((r) => r.character === godCharacter)!,
+    ...parsed.filter((r) => r.character !== godCharacter)
+  ];
   return {
     godCharacter,
     godName: OFFICE_CHARACTER_DISPLAY[godCharacter],
-    extraCharacters: parsed.filter((r) => r.character !== godCharacter).map((r) => r.character)
+    extraCharacters: ordered.slice(1).map((r) => r.character),
+    roles: ordered
   };
 }
 
@@ -182,7 +238,7 @@ export function toggleCreateRole(
     const remaining = roles.filter((r) => r.character !== character);
     if (remaining.length === 0) return [];
     if (remaining.some((r) => r.asGod)) return remaining.map((r) => ({ ...r }));
-    return remaining.map((r, i) => ({ character: r.character, asGod: i === 0 }));
+    return remaining.map((r, i) => ({ ...r, asGod: i === 0 }));
   }
   const hasGod = roles.some((r) => r.asGod);
   return [...roles.map((r) => ({ ...r })), { character, asGod: !hasGod }];
@@ -193,7 +249,7 @@ export function assignCreateProjectGod(
   character: OfficeCharacterName
 ): CreateProjectRole[] {
   if (!roles.some((r) => r.character === character)) return roles.map((r) => ({ ...r }));
-  return roles.map((r) => ({ character: r.character, asGod: r.character === character }));
+  return roles.map((r) => ({ ...r, asGod: r.character === character }));
 }
 
 export interface ProjectRow {

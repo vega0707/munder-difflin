@@ -17,11 +17,13 @@
  * plain Node module.
  */
 
-/** Groq's OpenAI-compatible transcription endpoint. */
-const GROQ_TRANSCRIBE_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
+import { STT_PROVIDERS } from '../shared/sttProviders';
+
+/** Groq's OpenAI-compatible transcription endpoint (kept as the default host). */
+const GROQ_TRANSCRIBE_URL = STT_PROVIDERS.groq.endpoint;
 /** Default model — fast, multilingual; ~216× real-time. The other option is the
  *  higher-accuracy `whisper-large-v3`. */
-export const DEFAULT_GROQ_MODEL = 'whisper-large-v3-turbo';
+export const DEFAULT_GROQ_MODEL = STT_PROVIDERS.groq.defaultModel;
 /** Groq free-tier upload cap is 25 MB; reject larger payloads before we spend a
  *  network round-trip (our clips are seconds long / tens of KB in practice). */
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
@@ -39,6 +41,8 @@ export interface TranscribeOptions {
   filename?: string;
   /** Groq model id. Defaults to DEFAULT_GROQ_MODEL. */
   model?: string;
+  /** Override the transcription URL (SiliconFlow, a proxy, …). Defaults to Groq. */
+  endpoint?: string;
   /** Optional ISO-639-1 language hint to improve accuracy/latency. */
   language?: string;
 }
@@ -65,6 +69,7 @@ export async function transcribeWithGroq(opts: TranscribeOptions): Promise<Trans
   const mimeType = opts.mimeType || 'audio/webm';
   const filename = opts.filename || 'dictation.webm';
   const model = opts.model || DEFAULT_GROQ_MODEL;
+  const endpoint = (opts.endpoint && opts.endpoint.trim()) || GROQ_TRANSCRIBE_URL;
 
   const form = new FormData();
   form.append('model', model);
@@ -77,7 +82,7 @@ export async function transcribeWithGroq(opts: TranscribeOptions): Promise<Trans
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const res = await fetch(GROQ_TRANSCRIBE_URL, {
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { Authorization: `Bearer ${opts.apiKey}` },
       body: form,

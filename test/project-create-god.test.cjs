@@ -35,13 +35,15 @@ test('create project rejects an unknown character', () => {
 
 test('create project accepts one god and optional extra workers', () => {
   const parsed = assertCreateProjectRoles([
-    { character: 'dwight', asGod: true },
-    { character: 'jim' },
+    { character: 'dwight', asGod: true, title: 'Lead' },
+    { character: 'jim', title: 'Sales' },
     { character: 'pam' }
   ]);
   assert.equal(parsed.godCharacter, 'dwight');
   assert.deepEqual(parsed.extraCharacters, ['jim', 'pam']);
   assert.equal(parsed.godName, 'Dwight');
+  assert.equal(parsed.roles[0].title, 'Lead');
+  assert.equal(parsed.roles[1].title, 'Sales');
   assert.equal(canSubmitCreateProject([{ character: 'dwight', asGod: true }]), true);
 });
 

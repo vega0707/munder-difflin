@@ -25,9 +25,11 @@ async function seededHive(t) {
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const hive = new HiveManager(() => home, undefined, 'p1');
   await seedProjectCast(hive, {
-    godCharacter: 'michael',
-    godName: 'Michael',
-    extraCharacters: ['jim', 'pam'],
+    roles: [
+      { character: 'michael', asGod: true },
+      { character: 'jim' },
+      { character: 'pam' }
+    ],
     cwd: home
   });
   return { home, hive };

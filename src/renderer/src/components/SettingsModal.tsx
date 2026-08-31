@@ -22,6 +22,7 @@ import { McpDefaultsSettings } from './McpDefaultsSettings';
 import { IntegrationsRegistry } from './IntegrationsRegistry';
 import { AiEnginesSettings } from './AiEnginesSettings';
 import { REALTIME_MODEL } from '@shared/realtimePricing';
+import { resolveSttProvider, STT_PROVIDERS, type SttProviderId } from '@shared/sttProviders';
 import { RealtimeDevicePicker } from '@/realtime/DevicePicker';
 import { CostHud } from '@/realtime/CostHud';
 import {
@@ -223,7 +224,7 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
   // ─── v0.3.4 redesign: settings that were onboarding-trapped or UI-less ────
   const cfgX = config as HarnessConfig & {
     strongKeepalive?: boolean; audience?: string; autoMode?: boolean;
-    defaultModel?: string; maxTurns?: number; semanticMemory?: boolean;
+    defaultModel?: string; maxTurns?: number; maxActiveAgents?: number; semanticMemory?: boolean;
   };
   /**
    * ONE SAVE BUTTON.
@@ -305,6 +306,14 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
     const n = maxTurnsVal.trim() === '' ? undefined : Number(maxTurnsVal);
     return { maxTurns: Number.isFinite(n as number) && (n as number) > 0 ? Math.round(n as number) : undefined } as Partial<HarnessConfig>;
   };
+  const [maxActiveVal, setMaxActiveVal] = useState<string>(
+    String(cfgX.maxActiveAgents != null ? cfgX.maxActiveAgents : 5)
+  );
+  const maxActivePatch = (): Partial<HarnessConfig> => {
+    const n = Number(maxActiveVal);
+    const clamped = Number.isFinite(n) ? Math.min(32, Math.max(1, Math.floor(n))) : 5;
+    return { maxActiveAgents: clamped } as Partial<HarnessConfig>;
+  };
   const [semMemOn, setSemMemOn] = useState<boolean>(cfgX.semanticMemory !== false);
   const toggleSemMem = async () => {
     const next = !semMemOn;
@@ -352,6 +361,7 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
     try {
       const patch: Partial<HarnessConfig> = {
         ...maxTurnsPatch(),
+        ...maxActivePatch(),
         ...budgetPatch(),
         ...pending
       };
@@ -535,7 +545,12 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
   // with `?? false` displayed OFF while the feature was actually running.
   const [freeflowEnabled, setFreeflowEnabled] = useState(config.freeflowEnabled !== false);
   const [groqKey, setGroqKey] = useState(config.groqApiKey ?? '');
-  const [freeflowModel, setFreeflowModel] = useState(config.freeflowModel ?? 'whisper-large-v3-turbo');
+  const [freeflowProvider, setFreeflowProvider] = useState<SttProviderId>(
+    config.freeflowProvider === 'siliconflow' ? 'siliconflow' : 'groq'
+  );
+  const [freeflowModel, setFreeflowModel] = useState(
+    config.freeflowModel ?? resolveSttProvider(config.freeflowProvider).defaultModel
+  );
   const [showGroqKey, setShowGroqKey] = useState(false);
   const [freeflowBusy, setFreeflowBusy] = useState(false);
   const [freeflowNote, setFreeflowNote] = useState('');
@@ -570,7 +585,11 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
       setKgEnabled(kgOn);
       setFreeflowEnabled(cc.freeflowEnabled !== false);
       setGroqKey(cc.groqApiKey ?? '');
-      setFreeflowModel(cc.freeflowModel ?? 'whisper-large-v3-turbo');
+      const provider: SttProviderId = cc.freeflowProvider === 'siliconflow' ? 'siliconflow' : 'groq';
+      setFreeflowProvider(provider);
+      const stt = resolveSttProvider(provider);
+      const saved = cc.freeflowModel;
+      setFreeflowModel(stt.models.some((m) => m.id === saved) ? saved! : stt.defaultModel);
       setIdleDisconnectMs((c as HarnessConfig).realtimeIdleDisconnectMs ?? 180_000);
     }).catch(() => { /* keep prop-seeded values */ });
     window.cth.kgStatus().then((s) => { if (alive) setKgDocCount(s.docCount); })
@@ -767,7 +786,8 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
       await window.cth.freeflowSetConfig({
         enabled,
         apiKey: groqKey,
-        model: freeflowModel.trim() || 'whisper-large-v3-turbo'
+        provider: freeflowProvider,
+        model: freeflowModel.trim() || resolveSttProvider(freeflowProvider).defaultModel
       });
       setFreeflowEnabledStore(enabled);
       // Mirror boolean key-presence so the voice button enables/disables live
@@ -1108,6 +1128,39 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
                               <option key={l.code} value={l.code}>{l.label}</option>
                             ))}
                           </select>
+                        </div>
+                      </div>
+
+                      <div style={{ height: 1, background: 'var(--cth-ink-300)' }} />
+
+                      <div>
+                        <div style={sectionHead}>
+                          {t('settings.general.maxLiveAgents')}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <span style={{ fontSize: 13, lineHeight: '20px', color: 'var(--cth-ink-900)' }}>
+                              {t('settings.general.maxLiveAgents')}
+                            </span>
+                            <span style={{ fontSize: 12, lineHeight: '16px', color: 'var(--cth-ink-500)' }}>
+                              {t('settings.general.maxLiveAgentsDesc')}
+                            </span>
+                          </div>
+                          <input
+                            type="number"
+                            min={1}
+                            max={32}
+                            step={1}
+                            value={maxActiveVal}
+                            onChange={(e) => setMaxActiveVal(e.target.value)}
+                            onBlur={() => {
+                              const patch = maxActivePatch();
+                              setMaxActiveVal(String(patch.maxActiveAgents ?? 5));
+                              stage(patch);
+                            }}
+                            style={{ ...slackInputStyle, width: 88 }}
+                            aria-label={t('settings.general.maxLiveAgents')}
+                          />
                         </div>
                       </div>
 
@@ -2045,15 +2098,42 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
 
                         {freeflowEnabled && (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                            {/* Groq API key — stored in main config, used only there. */}
+                            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 280 }}>
+                              <span style={slackLabelStyle}>{t('settings.voice.provider')}</span>
+                              <select
+                                value={freeflowProvider}
+                                onChange={(e) => {
+                                  const id: SttProviderId = e.target.value === 'siliconflow' ? 'siliconflow' : 'groq';
+                                  setFreeflowProvider(id);
+                                  setFreeflowModel(resolveSttProvider(id).defaultModel);
+                                }}
+                                style={{ ...slackInputStyle }}
+                              >
+                                <option value="siliconflow">{t('settings.voice.providerSiliconFlow')}</option>
+                                <option value="groq">{t('settings.voice.providerGroq')}</option>
+                              </select>
+                              <span style={{ fontSize: 12, lineHeight: '16px', color: 'var(--cth-ink-500)' }}>
+                                {t(freeflowProvider === 'siliconflow'
+                                  ? 'settings.voice.providerSiliconFlowHint'
+                                  : 'settings.voice.providerGroqHint')}
+                              </span>
+                            </label>
+
+                            {/* STT API key — stored in main config, used only there. */}
                             <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                              <span style={slackLabelStyle}>{t('settings.voice.groqKey')}</span>
+                              <span style={slackLabelStyle}>
+                                {t(freeflowProvider === 'siliconflow'
+                                  ? 'settings.voice.siliconflowKey'
+                                  : 'settings.voice.groqKey')}
+                              </span>
                               <div style={{ display: 'flex', gap: 6 }}>
                                 <input
                                   type={showGroqKey ? 'text' : 'password'}
                                   value={groqKey}
                                   onChange={(e) => setGroqKey(e.target.value)}
-                                  placeholder={t('settings.voice.groqPlaceholder')}
+                                  placeholder={t(freeflowProvider === 'siliconflow'
+                                    ? 'settings.voice.siliconflowPlaceholder'
+                                    : 'settings.voice.groqPlaceholder')}
                                   style={{ ...slackInputStyle, fontFamily: 'var(--cth-font-mono)' }}
                                 />
                                 <PixelButton variant="secondary" size="sm" onClick={() => setShowGroqKey((v) => !v)} disabled={!groqKey}>
@@ -2070,8 +2150,9 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
                                 onChange={(e) => setFreeflowModel(e.target.value)}
                                 style={{ ...slackInputStyle, fontFamily: 'var(--cth-font-mono)' }}
                               >
-                                <option value="whisper-large-v3-turbo">{t('settings.voice.fast')}</option>
-                                <option value="whisper-large-v3">{t('settings.voice.accurate')}</option>
+                                {STT_PROVIDERS[freeflowProvider].models.map((m) => (
+                                  <option key={m.id} value={m.id}>{t(`settings.voice.${m.labelKey}`)}</option>
+                                ))}
                               </select>
                             </label>
 

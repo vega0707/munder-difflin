@@ -35,17 +35,20 @@ import { PersistStore } from './db';
 import { ProjectRegistry, projectRootOf } from './projectRegistry';
 import { resolveHive, projectIdFromPayload } from './hiveRouter';
 import { listProjectTemplates, saveProjectTemplate, deleteProjectTemplate } from './projectTemplateStore';
+import { listRoles, saveRole, deleteRole } from './roleCatalogStore';
+import { proposeRoleFromBrief } from './rolePropose';
 import { SeatBoard, FileSeatStore } from './seatBoard';
 import { SeatHub } from './seatHub';
 import { BuiltinAgentHost } from './builtinAgentHost';
 import {
-  MAX_ACTIVE_AGENTS,
+  resolveMaxActiveAgents,
   DEFAULT_PROJECT_ID,
   parseAgentPtyId,
   isOfficeCharacter,
   type CreateProjectRole,
   type OfficeCharacterName
 } from '../shared/projectTypes';
+import { parseSeatAllowlist } from '../shared/seatTools';
 import {
   DEFAULT_SEAT_HUB_PORT,
   SEAT_HEARTBEAT_MS,
@@ -68,7 +71,8 @@ import {
 import {
   appendTriggerHistory, clearTriggerHistory, listTriggerHistory, updateTriggerHistory
 } from './triggerHistory';
-import { transcribeWithGroq, DEFAULT_GROQ_MODEL } from './freeflow';
+import { transcribeWithGroq } from './freeflow';
+import { resolveSttProvider, isSttProviderId } from '../shared/sttProviders';
 import { registerRealtimeIpc } from './realtime';
 import { registerRealtimeActionIpc } from './realtimeActions';
 import { initCompletionWatcher } from './realtimeCompletionWatcher';
@@ -114,6 +118,29 @@ import {
 } from '../shared/codexRemote';
 
 const isDev = !!process.env.ELECTRON_RENDERER_URL;
+
+// Chromium (Electron 32.x) on macOS spams stderr with harmless
+// `eglQueryDeviceAttribEXT: Bad attribute` lines from gl_display.cc. Mute that
+// known noise without `disable-gpu` — the office floor needs WebGL. Raise the
+// Chromium log floor (3 = FATAL) and filter residual matching lines on stderr.
+app.commandLine.appendSwitch('log-level', '3');
+{
+  const noisyGpu = /eglQueryDeviceAttribEXT|ERROR:gl_display\.cc/;
+  const writeStderr = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((
+    chunk: string | Uint8Array,
+    encoding?: BufferEncoding | ((err?: Error | null) => void),
+    cb?: (err?: Error | null) => void
+  ): boolean => {
+    const text = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+    if (noisyGpu.test(text)) {
+      if (typeof encoding === 'function') encoding(null);
+      else if (typeof cb === 'function') cb(null);
+      return true;
+    }
+    return writeStderr(chunk as never, encoding as never, cb as never);
+  }) as typeof process.stderr.write;
+}
 
 // Keep the main process alive on an unexpected throw/rejection. The harness is a
 // multi-agent supervisor — a single stray throw (e.g. node-pty's ConPTY console
@@ -386,6 +413,7 @@ function bindActiveHive(next: HiveManager, _previousId: string | null): void {
 const projectRegistry = new ProjectRegistry({
   persist,
   getHarnessHome: () => readConfig().harnessHome,
+  getMaxActiveAgents: () => resolveMaxActiveAgents(readConfig().maxActiveAgents),
   pty: ptyManager,
   emit: emitToRenderer,
   onProjectReady: (h) => {
@@ -680,6 +708,33 @@ interface PreservedWorktree {
  *  sweep drains this: an entry is removed (worktree + scratch GC'd) only when the
  *  work is provably integrated, or when the worktree is already gone from disk. */
 const preservedWorktrees = new Map<string, PreservedWorktree>();
+
+/**
+ * Soft-release a live slot: kill the engine process but KEEP the hive agent on
+ * the floor (role / memory / session id / worktree stay). Used when a worker is
+ * idle with no queued work — pull them back up on the next task via --resume.
+ * Unlike teardownPty, this does NOT archive and does NOT delete the worktree.
+ */
+function parkPty(id: string): { ok: boolean; error?: string } {
+  const agentId = ptyToAgent.get(id) ?? parseAgentPtyId(id)?.agentId;
+  const res = ptyManager.kill(id);
+  if (!res.ok) return res;
+  if (agentId) {
+    ptyToAgent.delete(id);
+    try { workerWake.forget(agentId, id); } catch { /* best-effort */ }
+    try { breaker.forget(agentId); } catch { /* best-effort */ }
+    try { hive.stopProxyBridge(agentId); } catch { /* best-effort */ }
+    // Keep hive registry active (not archived) so the seat remains on the floor.
+    if (hive.enabled()) {
+      try { hive.setArchived(agentId, false); } catch { /* best-effort */ }
+    }
+  }
+  // Leave worktreePaths / sessionId in place for the next on-demand spawn.
+  try { integrationBroker.revoke(id); } catch { /* best-effort */ }
+  if (liveWorkers.has(id)) liveWorkers.delete(id);
+  syncKeepAwake();
+  return { ok: true };
+}
 
 /**
  * Tear down everything tied to a PTY id: archive its hive agent, remove its
@@ -1135,28 +1190,29 @@ function syncContextTriggers(): void {
   }
 }
 
-/** Startup migration (#57/#58): archive every agent entry that is `archived:false`
- *  but has NO live PTY. This runs in bootstrapHiveServices, BEFORE the renderer can
- *  respawn anything, so at this point NO agent owns a PTY — every `archived:false`
- *  entry is therefore a stale carry-over from a prior session that quit/crashed
- *  WITHOUT archiving (e.g. the pre-acc13a3 'assistant' Dwight entry). Left as-is
- *  they have no live PTY, so the breaker beat steers them and the steer bounces to
- *  GOD as a requires_reply GOD can't clear → inbox flood.
+/** Startup hygiene (#57/#58): only archive leftover *assistant* shells.
  *
- *  "No live PTY" = ptyForAgent(id) === undefined (ptyToAgent is populated only at
- *  spawn and pruned on teardown). God is never archived. A user's real agents are
- *  unaffected: the "restore team" flow respawns them through ensureAgent, which
- *  re-clears `archived` — restorability does not depend on the archived flag. */
+ *  Historically this archived EVERY `archived:false` agent with no live PTY,
+ *  because at boot no PTYs exist yet. That was safe when "active" meant "has a
+ *  live engine". On-demand floors keep seats on the registry without a PTY
+ *  (idle = on floor; park releases the engine). Mass-archiving them on every
+ *  launch would wipe the cast.
+ *
+ *  The breaker already skips non-god agents without a live PTY, so leaving
+ *  on-floor seats `archived:false` no longer floods god's inbox. Assistants
+ *  are still archived — they are never floor seats.
+ */
 function archiveOrphanedAgents(): void {
   if (!hive.enabled()) return;
   try {
     const reg = hive.registry();
     for (const [id, a] of Object.entries(reg.agents)) {
       if (a.archived) continue;
-      if (id === reg.godId) continue;        // god is never archived
-      if (ptyForAgent(id)) continue;         // has a live PTY → genuinely active
-      hive.setArchived(id, true);            // stale archived:false orphan → archive
-      console.log('[migration] archived orphaned agent (no live PTY):', id);
+      if (id === reg.godId) continue;
+      if (!a.isAssistant) continue;
+      if (ptyForAgent(id)) continue;
+      hive.setArchived(id, true);
+      console.log('[migration] archived orphaned assistant (no live PTY):', id);
     }
   } catch (e) {
     console.error('[migration] archiveOrphanedAgents failed:', e);
@@ -2849,11 +2905,11 @@ async function spawnAgentCore(opts: AgentSpawnOptions, owner: Electron.WebConten
     analytics.track('agent_spawned', { provider });
     return { ok: true, cwd: opts.cwd, builtin: true };
   }
-  // God must always be able to clock in. Auto-restore can fill all 5 worker
-  // slots before the orchestrator finishes booting; without this exemption the
-  // floor ends up with employees and no Boss, and the UI just shows "empty".
+  // God must always be able to clock in. Auto-restore / live-slot fill can
+  // otherwise fill every concurrent slot before the orchestrator finishes.
   const spawningGod = opts.hive?.isGod === true;
-  if (!spawningGod && ptyManager.getActivePtyCount() >= MAX_ACTIVE_AGENTS) {
+  const liveCap = resolveMaxActiveAgents(readConfig().maxActiveAgents);
+  if (!spawningGod && ptyManager.getActivePtyCount() >= liveCap) {
     return { ok: false, error: 'SPAWN_LIMIT_REACHED', code: 'SPAWN_LIMIT_REACHED' } as { ok: boolean; error?: string };
   }
   // Activation-funnel entry (v0.4.6): every spawn REQUEST, so (attempted − spawned)
@@ -3270,6 +3326,11 @@ ipcMain.handle('pty:kill', (_evt, id: string) => {
   const res = ptyManager.kill(id);
   teardownPty(id);
   return res;
+});
+/** Soft-release: kill the engine, keep the seat on the floor for later resume. */
+ipcMain.handle('pty:park', (_evt, id: string) => {
+  if (typeof id !== 'string') return { ok: false, error: 'invalid id' };
+  return parkPty(id);
 });
 ipcMain.handle('pty:list', () => ptyManager.list());
 
@@ -3808,6 +3869,25 @@ ipcMain.handle('project:deleteTemplate', (_evt, id: unknown) => {
   if (typeof id !== 'string' || !id) return { ok: false, error: 'id required' };
   return deleteProjectTemplate(home, id);
 });
+
+ipcMain.handle('role:list', () => listRoles(readConfig().harnessHome ?? null));
+ipcMain.handle('role:save', (_evt, payload: unknown) => {
+  const home = readConfig().harnessHome;
+  if (!home) return { ok: false, error: 'no harnessHome' };
+  return saveRole(home, payload);
+});
+ipcMain.handle('role:delete', (_evt, id: unknown) => {
+  const home = readConfig().harnessHome;
+  if (!home) return { ok: false, error: 'no harnessHome' };
+  if (typeof id !== 'string' || !id) return { ok: false, error: 'id required' };
+  return deleteRole(home, id);
+});
+ipcMain.handle('role:proposeFromBrief', async (_evt, payload: unknown) => {
+  const body = payload && typeof payload === 'object' ? payload as { brief?: unknown; cwd?: unknown } : {};
+  const brief = typeof body.brief === 'string' ? body.brief : '';
+  const cwd = typeof body.cwd === 'string' ? body.cwd : undefined;
+  return proposeRoleFromBrief(brief, cwd);
+});
 ipcMain.handle('seat:list', (_evt, projectId: unknown) => {
   const id = typeof projectId === 'string' && projectId
     ? projectId
@@ -4101,6 +4181,16 @@ ipcMain.handle('hive:patchAgentRole', (_evt, id: unknown, role: unknown) => {
   if (typeof role !== 'string') return { ok: false, error: 'invalid role' };
   if (!hive.enabled()) return { ok: false, error: 'hive disabled (no harnessHome)' };
   return hive.patchAgentRole(id, role);
+});
+ipcMain.handle('hive:patchAgentTools', (_evt, id: unknown, patch: unknown) => {
+  if (typeof id !== 'string') return { ok: false, error: 'invalid id' };
+  if (!patch || typeof patch !== 'object') return { ok: false, error: 'invalid patch' };
+  if (!hive.enabled()) return { ok: false, error: 'hive disabled (no harnessHome)' };
+  const body = patch as { skills?: unknown; mcp?: unknown };
+  return hive.patchAgentTools(id, {
+    ...('skills' in body ? { skills: body.skills === null ? null : parseSeatAllowlist(body.skills) ?? [] } : {}),
+    ...('mcp' in body ? { mcp: body.mcp === null ? null : parseSeatAllowlist(body.mcp) ?? [] } : {})
+  });
 });
 
 // ─── IPC: Settings hero payload (remote data, cached) ───────────────────────
@@ -4930,33 +5020,38 @@ function upsertLegacyWebhookTrigger(patch: { secret?: string; enabled?: boolean 
 // (CGEventTap) is deferred; hold-Option is the human-chosen v1 activation.
 
 ipcMain.handle('freeflow:setConfig', (_evt, patch: unknown) => {
-  const p = (patch ?? {}) as { enabled?: unknown; apiKey?: unknown; model?: unknown };
+  const p = (patch ?? {}) as { enabled?: unknown; apiKey?: unknown; model?: unknown; provider?: unknown };
   const next: Partial<HarnessConfig> = {};
   if (typeof p.enabled === 'boolean') next.freeflowEnabled = p.enabled;
   // Trim string fields; an emptied key clears back to undefined.
   if (typeof p.apiKey === 'string') next.groqApiKey = p.apiKey.trim() || undefined;
-  if (typeof p.model === 'string') next.freeflowModel = p.model.trim() || DEFAULT_GROQ_MODEL;
+  if (isSttProviderId(p.provider)) next.freeflowProvider = p.provider;
+  const stt = resolveSttProvider(typeof p.provider === 'string' ? p.provider : undefined);
+  if (typeof p.model === 'string') next.freeflowModel = p.model.trim() || stt.defaultModel;
   writeConfig(next);
   return { ok: true };
 });
 
-/** Transcribe one captured audio clip via Groq. Gated on the flag + a key being
- *  present, so a disabled feature can NEVER reach the network. The Groq key stays
- *  in main — only the audio bytes cross IPC inbound and the transcript outbound. */
+/** Transcribe one captured audio clip via the selected STT host. Gated on the
+ *  flag + a key being present, so a disabled feature can NEVER reach the network.
+ *  The key stays in main — only the audio bytes cross IPC inbound and the
+ *  transcript outbound. */
 ipcMain.handle('freeflow:transcribe', async (_evt, arg: unknown) => {
   const cfg = readConfig();
   if (!cfg.freeflowEnabled) return { ok: false, error: 'Free Flow is disabled' };
-  if (!cfg.groqApiKey) return { ok: false, error: 'no Groq API key set' };
+  if (!cfg.groqApiKey) return { ok: false, error: 'no STT API key set' };
   const a = (arg ?? {}) as { audio?: unknown; mimeType?: unknown; filename?: unknown; language?: unknown };
   if (!(a.audio instanceof ArrayBuffer) && !(a.audio instanceof Uint8Array)) {
     return { ok: false, error: 'no audio' };
   }
+  const stt = resolveSttProvider(cfg.freeflowProvider);
   const out = await transcribeWithGroq({
     apiKey: cfg.groqApiKey,
     audio: a.audio,
     mimeType: typeof a.mimeType === 'string' ? a.mimeType : undefined,
     filename: typeof a.filename === 'string' ? a.filename : undefined,
-    model: cfg.freeflowModel || DEFAULT_GROQ_MODEL,
+    model: cfg.freeflowModel || stt.defaultModel,
+    endpoint: stt.endpoint,
     language: typeof a.language === 'string' && a.language ? a.language : undefined
   });
   if (out.ok) analytics.trackFeature('voice_dictation');
@@ -5047,6 +5142,19 @@ registerRealtimeActionIpc({
       } catch { /* window torn down */ }
     }
     return res;
+  },
+  saveRoleDraft: (draft) => {
+    const home = readConfig().harnessHome;
+    if (!home) return { ok: false, error: 'no harnessHome' };
+    const saved = saveRole(home, { ...draft, source: draft.source || 'ai-god' });
+    if (!saved.ok) return saved;
+    return { ok: true, roleId: saved.role.id };
+  },
+  findRoleTitle: (title) => {
+    const hit = listRoles(readConfig().harnessHome ?? null).find(
+      (r) => r.title.trim().toLowerCase() === title.trim().toLowerCase()
+    );
+    return hit ? { id: hit.id, title: hit.title } : null;
   },
   listMissions: () => readConfig().missions ?? [],
   // The spec carries lastFiredAt through from listMissions(), so a wholesale write

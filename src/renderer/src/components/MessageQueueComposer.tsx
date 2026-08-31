@@ -697,10 +697,16 @@ function FreeFlowButton({ agentId, hasGroqKey }: { agentId: string; hasGroqKey: 
                 <li>
                   {t('queueComposer.ffCreateKey')}{' '}
                   <a
+                    href="https://cloud.siliconflow.cn/account/ak"
+                    onClick={(e) => { e.preventDefault(); void window.cth.openExternal('https://cloud.siliconflow.cn/account/ak'); }}
+                    style={{ color: 'var(--cth-ink-900)' }}
+                  >cloud.siliconflow.cn</a>
+                  {' / '}
+                  <a
                     href="https://console.groq.com/keys"
                     onClick={(e) => { e.preventDefault(); void window.cth.openExternal('https://console.groq.com/keys'); }}
                     style={{ color: 'var(--cth-ink-900)' }}
-                  >console.groq.com/keys</a>
+                  >console.groq.com</a>
                 </li>
                 <li>{t('queueComposer.ffPasteKey')}</li>
                 <li>{t('queueComposer.ffClickOrHold')}</li>

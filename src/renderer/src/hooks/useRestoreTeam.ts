@@ -1,16 +1,14 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import { useStore, type Agent } from '@/store/store';
-import { buildSpawnCommand, inferAgentProvider, tokenizeCommand, type HarnessConfig } from '@/store/config';
-import { roleForHiveSpawn } from '@shared/agentRole';
+import { buildSpawnCommand, inferAgentProvider, type HarnessConfig } from '@/store/config';
 import { agentPtyId } from '@shared/projectTypes';
 
-/** "Restore team" — respawn every worker from the previous session.
+/** "Restore team" — put every previous-session worker back on the floor.
  *
- *  Lives here rather than inside AgentStrip because the floor strip is hidden in
- *  fullscreen, which used to mean the restore button (and the list of restorable
- *  agents) simply vanished when you went fullscreen. Both mount points share the
- *  progress state below, so a restore kicked off from one view shows as running
- *  in the other and can't be double-started. */
+ *  On-demand runtime: restore seats the *role* (command, cwd, session metadata)
+ *  without starting a live engine. Work / message queues pull them up via
+ *  ensureLiveSlots. Lives here rather than inside AgentStrip because the floor
+ *  strip is hidden in fullscreen. */
 
 let restoring = false;
 let note: string | null = null;
@@ -29,8 +27,8 @@ const listeners = new Set<() => void>();
  *  App.tsx reconciles the persisted roster against the PTYs actually alive in
  *  the main process, and that is an async round trip. Firing before it lands
  *  would read a restorable list that still contains agents whose terminals are
- *  already running, and try to spawn duplicates of them. The delay is also the
- *  window in which you can hit a dismiss ✕ if you don't want an agent back. */
+ *  already running. The delay is also the window in which you can hit a dismiss ✕
+ *  if you don't want an agent back. */
 export const AUTO_RESTORE_DELAY_MS = 2500;
 
 function emit(): void {
@@ -53,7 +51,7 @@ export interface RestoreTeamState {
   /** True when the run in flight was started automatically at boot, not by a
    *  click. Drives the "restoring your team…" banner. */
   autoRestoring: boolean;
-  /** Outcome of the last run ("restored 3 · 1 failed — …"), or null. */
+  /** Outcome of the last run ("seated 3 · 1 already live — …"), or null. */
   restoreNote: string | null;
   restoreTeam: () => Promise<void>;
 }
@@ -67,9 +65,9 @@ export function useRestoreTeam(config?: HarnessConfig | null): RestoreTeamState 
   const restoreNote = useSyncExternalStore(subscribe, getNote, getNote);
   const isAutoRestoring = useSyncExternalStore(subscribe, getAutoRestoring, getAutoRestoring);
 
-  /** Respawn every worker from the previous session with its ORIGINAL agent id,
-   *  cwd, model and command — the hive workspace (memory.md, inbox, registry
-   *  entry) reattaches by itself, no memory transplant needed. */
+  /** Seat every worker from the previous session with its ORIGINAL agent id,
+   *  cwd, model and command — no mandatory spawn. Live engines start only when
+   *  there is work (ensureLiveSlots) or a PTY is already running. */
   const restoreTeam = async (): Promise<void> => {
     if (restoring) return;
     restoring = true;
@@ -77,133 +75,99 @@ export function useRestoreTeam(config?: HarnessConfig | null): RestoreTeamState 
     emit();
     const prevSel = useStore.getState().selectedId;
     const restorableAgents = useStore.getState().restorableAgents;
-    // Tally every agent's outcome so the run ALWAYS leaves a visible trace — the
-    // original bug was that every failure path was console-only, so a click that
-    // couldn't spawn anything looked like a dead button.
-    let restored = 0;
+    let seated = 0;
     let alreadyLive = 0;
     const failures: string[] = [];
     try {
-      // Restore every agent CONCURRENTLY. Each spawn is keyed by its own ptyId and
-      // touches no cross-agent state in the renderer, and in the main process the
-      // whole `pty:spawn` handler (hive registry read-modify-write included) runs
-      // synchronously between awaits, so concurrent handlers can't interleave
-      // mid-update. Serially this cost the sum of every agent's git probe + spawn;
-      // a 6-agent team took ~6× one agent for no reason.
-      // Spawns run concurrently but agents are ADDED in roster order afterwards.
-      // Calling addAgent from inside each spawn made completion timing decide
-      // the roster order — and that order is persisted, so a slow provider or a
-      // slow git probe silently overwrote the sequence the user had dragged the
-      // cards into.
-      const restoredInOrder = await Promise.all([...restorableAgents].map(async (a): Promise<Agent | null> => {
-        // Per-agent guard: one agent's failure (or a rejected IPC call) must NEVER
-        // abort the others — an unhandled rejection here used to make the
-        // entire restore a silent no-op after the first bad agent.
+      const live = await window.cth.listPtys().catch(() => []);
+      const liveIds = new Set(live.map((p) => p.id));
+      const projectId = useStore.getState().activeProjectId ?? 'default';
+
+      const seatedInOrder: Array<Agent | null> = [];
+      for (const a of restorableAgents) {
         try {
           const provider = inferAgentProvider(a.command, a.provider);
           const command = (a.command ?? '').trim() || (config ? buildSpawnCommand(config, a.model, provider) : '');
           if (!command || !a.cwd) {
-            // No spawn recipe (an old entry persisted before `command`, with no
-            // config to rebuild one). Keep it restorable and SAY why rather than
-            // silently dropping it — silent removal read as "nothing happened".
             failures.push(`${a.name}: no saved command`);
-            return null;
+            seatedInOrder.push(null);
+            continue;
           }
-          const [exe, ...args] = tokenizeCommand(command);
-          const projectId = useStore.getState().activeProjectId ?? 'default';
-          const ptyId = a.ptyId?.startsWith('pty:') ? a.ptyId : agentPtyId(projectId, a.id);
-          // An isolated agent's worktree SURVIVES an app restart on disk (it's only
-          // torn down on per-tab close / mid-session exit, not on quit). So re-enter
-          // that exact worktree as the cwd rather than re-isolating — `git worktree
-          // add` would conflict with the existing path/branch, and re-isolating would
-          // also lose the worktree's uncommitted work. cwd = the worktree means
-          // resume + seedSessionTranscript land in the CORRECT checkout.
-          // But the user may have manually pruned/deleted the worktree between runs —
-          // gitIsRepo (git rev-parse) returns false for a missing/invalid dir, so
-          // fall back to the base repo cwd rather than spawning into a dead path.
-          let cwd = a.cwd;
-          let worktreeGone = false;
-          if (a.worktreePath) {
-            if (await window.cth.gitIsRepo(a.worktreePath)) {
-              cwd = a.worktreePath;
-            } else {
-              worktreeGone = true;
-              console.warn(`[restore] worktree gone for ${a.id} (${a.worktreePath}); falling back to base repo ${a.cwd}`);
-            }
-          }
-          const res = await window.cth.spawnPty({
-            id: ptyId,
-            cwd,
-            command: exe,
-            provider,
-            args,
-            cols: 100,
-            rows: 30,
-            // Worktree (if any) already exists on disk — cd into it, don't create a
-            // new one (re-isolating would conflict on the existing path/branch and
-            // lose its uncommitted work).
-            isolate: false,
-            // Continue the worker's prior CLI session if one was recorded — the
-            // main process picks the provider's resume flag (Claude --resume,
-            // agy --conversation) and for Claude reattaches the transcript. The
-            // agent id is preserved across restart, so its registry entry,
-            // memory.md and inbox reattach by id. No-op without a recorded session.
-            resume: true,
-            projectId,
-            hive: { id: a.id, name: a.name, provider, cwd, role: roleForHiveSpawn(a) }
-          });
-          if (res.ok) {
-            restored++;
-            return {
-                ...a,
-                provider,
-                ptyId,
-                archived: false,
-                status: 'idle',
-                // Surface the worktree fallback on the floor card; otherwise normal.
-                action: worktreeGone ? 'worktree gone — using base repo' : 'starting up',
-                // The worktree is no longer on disk — drop it so this agent is treated
-                // as a plain base-cwd agent going forward (a future restore won't keep
-                // re-probing a dead path).
-                worktreePath: worktreeGone ? undefined : a.worktreePath,
-                // Crush spawns bare (no positional protocol) and hands the seed back
-                // here; useHive types it after boot. Re-seeding a resumed worker is
-                // idempotent (it just re-reads its inbox per protocol). (ondev-b)
-                seedPrompt: res.seedPrompt,
-                carrying: undefined,
-                currentStation: 'desk',
-                recentTextTs: Date.now()
-            };
-          } else if ((res.error ?? '').includes('already exists')) {
-            // A live PTY with this id is already running (e.g. respawned at boot or
-            // by another path) — the agent isn't actually missing, so retire it from
-            // the restorable list rather than reporting a phantom failure.
+
+          const expectedPty = a.ptyId?.startsWith('pty:') ? a.ptyId : agentPtyId(projectId, a.id);
+          if (liveIds.has(expectedPty)) {
             alreadyLive++;
             useStore.getState().removeRestorableAgent(a.id);
-          } else {
-            // Leave it restorable so the user can retry — but record WHY so the
-            // outcome is shown on the floor, not buried in the devtools console.
-            failures.push(`${a.name}: ${res.error ?? 'spawn failed'}`);
-            console.error('[restore] spawn failed for', a.id, res.error);
+            seatedInOrder.push({
+              ...a,
+              provider,
+              command,
+              ptyId: expectedPty,
+              archived: false,
+              status: 'idle',
+              action: 'starting up',
+              carrying: undefined,
+              currentStation: 'desk',
+              recentTextTs: Date.now()
+            });
+            continue;
           }
+
+          // Probe worktree so a later on-demand spawn can resume there; drop a
+          // dead path rather than keep re-probing it.
+          let worktreePath = a.worktreePath;
+          if (worktreePath && !(await window.cth.gitIsRepo(worktreePath).catch(() => false))) {
+            worktreePath = undefined;
+          }
+
+          seated++;
+          seatedInOrder.push({
+            ...a,
+            provider,
+            command,
+            ptyId: undefined,
+            archived: false,
+            status: 'idle',
+            action: 'idle',
+            worktreePath,
+            carrying: undefined,
+            currentStation: 'desk',
+            recentTextTs: Date.now()
+          });
         } catch (e) {
           failures.push(`${a.name}: ${e instanceof Error ? e.message : String(e)}`);
           console.error('[restore] error for', a.id, e);
+          seatedInOrder.push(null);
         }
-        return null;
-      }));
-      // Add in the ORIGINAL roster order, not completion order.
-      for (const restoredAgent of restoredInOrder) {
-        if (restoredAgent) useStore.getState().addAgent(restoredAgent);
+      }
+
+      for (const seatedAgent of seatedInOrder) {
+        if (!seatedAgent) continue;
+        const existing = useStore.getState().agents.find((x) => x.id === seatedAgent.id);
+        if (existing) {
+          useStore.getState().updateAgent(seatedAgent.id, {
+            provider: seatedAgent.provider,
+            ptyId: seatedAgent.ptyId,
+            command: seatedAgent.command,
+            archived: false,
+            status: seatedAgent.status,
+            action: seatedAgent.action,
+            worktreePath: seatedAgent.worktreePath,
+            carrying: undefined,
+            currentStation: seatedAgent.currentStation,
+            recentTextTs: seatedAgent.recentTextTs
+          });
+          useStore.getState().removeRestorableAgent(seatedAgent.id);
+        } else {
+          useStore.getState().addAgent(seatedAgent);
+        }
       }
     } finally {
-      // addAgent auto-selects each spawn; put the user back where they were.
       const sel = useStore.getState();
       if (prevSel && sel.agents.some((x) => x.id === prevSel)) sel.select(prevSel);
       restoring = false;
-      // ALWAYS surface a result so the button can never look inert.
       const parts: string[] = [];
-      if (restored) parts.push(`restored ${restored}`);
+      if (seated) parts.push(`seated ${seated}`);
       if (alreadyLive) parts.push(`${alreadyLive} already live`);
       if (failures.length) parts.push(`${failures.length} failed — ${failures.join('; ')}`);
       note = parts.length ? parts.join(' · ') : 'nothing to restore';
@@ -229,7 +193,7 @@ export function useRestoreTeam(config?: HarnessConfig | null): RestoreTeamState 
       if (autoStarted || restoring || timer) return;
       if (!useStore.getState().restorableAgents.length) return;
       // Wait for the god bootstrap to finish (ready or failed) so auto-restore
-      // cannot fill every concurrent slot before Boss clocks in.
+      // cannot race Boss clock-in.
       const gs = useStore.getState().godStatus;
       if (gs === 'booting') return;
       timer = setTimeout(() => {

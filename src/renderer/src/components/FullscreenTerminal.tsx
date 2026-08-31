@@ -154,7 +154,8 @@ export function FullscreenTerminal({ config }: FullscreenTerminalProps) {
   const fullscreenAgentId = useStore(s => s.fullscreenAgentId);
   const setFullscreen = useStore(s => s.setFullscreen);
   const select = useStore(s => s.select);
-  const setAddAgentOpen = useStore(s => s.setAddAgentOpen);
+  const setRolePickerOpen = useStore(s => s.setRolePickerOpen);
+  const rolePickerOpen = useStore(s => s.rolePickerOpen);
   const addAgentOpen = useStore(s => s.addAgentOpen);
   // Owned HERE, not in Header, purely so the Esc handler below can see it:
   // Esc closing the dialog must not also throw you out of focus mode.
@@ -163,7 +164,7 @@ export function FullscreenTerminal({ config }: FullscreenTerminalProps) {
   const updateAgent = useStore(s => s.updateAgent);
   // The floor strip (and with it the restore button) is hidden behind the
   // overlay, so the roster carries restore too.
-  const { restoring, autoRestoring, restoreTeam } = useRestoreTeam(config);
+  const { restoring, autoRestoring, restoreNote, restoreTeam } = useRestoreTeam(config);
   const appThemeNow = useAppTheme();
 
   const agent = agents.find(a => a.id === fullscreenAgentId);
@@ -252,14 +253,14 @@ export function FullscreenTerminal({ config }: FullscreenTerminalProps) {
       if (e.key === 'Escape') {
         // A modal above fullscreen owns the interaction until it closes. Without
         // this guard, Esc from the Add Agent form unexpectedly exits fullscreen.
-        if (addAgentOpen || editAgentOpen) return;
+        if (addAgentOpen || rolePickerOpen || editAgentOpen) return;
         e.preventDefault();
         setFullscreen(null);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [addAgentOpen, editAgentOpen, setFullscreen]);
+  }, [addAgentOpen, rolePickerOpen, editAgentOpen, setFullscreen]);
 
   // Focus mode is pointing at something we cannot render. Re-home to another live
   // agent rather than dropping the user out; leave only when nothing is left.
@@ -417,7 +418,7 @@ export function FullscreenTerminal({ config }: FullscreenTerminalProps) {
         }}>
           <div style={{ padding: 8, borderBottom: '1px solid var(--cth-ink-300)' }}>
             <button
-              onClick={() => setAddAgentOpen(true)}
+              onClick={() => setRolePickerOpen(true)}
               title={t('fullscreenTerminal.addAgent')}
               style={{
                 width: '100%', height: 32,
@@ -523,6 +524,14 @@ export function FullscreenTerminal({ config }: FullscreenTerminalProps) {
                     <Icon name="play" /> {restoring ? t('agentStrip.restoringTeam') : t('agentStrip.restoreTeam', { count: restorableAgents.length })}
                   </span>
                 </PixelButton>
+              )}
+              {restoreNote && !restoring && !autoRestoring && (
+                <div style={{
+                  fontFamily: 'var(--cth-font-ui)', fontSize: 11, lineHeight: '14px',
+                  color: restoreNote.includes('failed') ? 'var(--cth-coral-700)' : 'var(--cth-ink-500)'
+                }}>
+                  {restoreNote}
+                </div>
               )}
               {!autoRestoring && restorableAgents.length > 0 && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>

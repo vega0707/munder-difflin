@@ -256,6 +256,9 @@ export interface HarnessConfig {
   /** Max concurrent god-triggered ephemeral Slack workers; extra spawn-requests
    *  wait in the queue (natural backpressure, a resource backstop). Default 4. */
   maxConcurrentWorkers?: number;
+  /** Global live-PTY cap across ALL projects. Extra seats stay on the floor
+   *  without a PTY (划水) until a slot frees. Default MAX_ACTIVE_AGENTS (5). */
+  maxActiveAgents?: number;
   /** Minutes an ephemeral worker may produce NO output before the reaper kills it
    *  — idle-based, never wall-clock, so an actively-working worker is never reaped.
    *  Default 20. */
@@ -346,11 +349,14 @@ export interface HarnessConfig {
    *  the composer shows no mic button, no getUserMedia runs, and no Groq call is
    *  ever made (zero behavior change). */
   freeflowEnabled?: boolean;
-  /** User-pasted Groq API key (the user supplies their own free key). Used ONLY in
-   *  the main process for the Groq STT call; NEVER logged, and never crosses IPC
-   *  for the request. Treated like `slackBotToken`. */
+  /** User-pasted STT API key (Groq `gsk_…` or SiliconFlow `sk-…`). Used ONLY in
+   *  the main process for the transcription call; NEVER logged, and never
+   *  crosses IPC for the request. Treated like `slackBotToken`. */
   groqApiKey?: string;
-  /** Groq Whisper model id. Default 'whisper-large-v3-turbo' (fast, multilingual). */
+  /** STT backend for Free Flow. Default groq (original path). `siliconflow`
+   *  is the China-reachable SenseVoice host. */
+  freeflowProvider?: 'groq' | 'siliconflow';
+  /** Groq Whisper / SenseVoice model id. Default follows the selected provider. */
   freeflowModel?: string;
 
   // ─── Realtime Michael (premium speech-to-speech voice orchestrator) ─────────
@@ -448,6 +454,7 @@ const DEFAULTS: HarnessConfig = {
   // (safe-readonly ON, write/secret OFF).
   mcpDefaults: defaultMcpDefaults(),
   maxConcurrentWorkers: 4,
+  maxActiveAgents: 5,
   workerIdleTimeoutMinutes: 20,
   integrations: [],
   defaultWorkerTokenCap: 0, // 0 = unlimited (human directive: NO per-worker cap)
@@ -469,6 +476,7 @@ const DEFAULTS: HarnessConfig = {
   slackProactivePosting: false,
   freeflowEnabled: true,
   groqApiKey: undefined,
+  freeflowProvider: 'groq',
   freeflowModel: 'whisper-large-v3-turbo',
   realtimeVoiceEnabled: false,
   realtimeIdleDisconnectMs: 180_000,

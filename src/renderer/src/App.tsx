@@ -6,6 +6,7 @@ import type { HarnessConfig } from '@/store/config';
 import { DEFAULT_ORG_TRIGGER } from '@shared/triggers';
 import { OfficeFloor } from '@/scene/office/OfficeFloor';
 import { useHive } from '@/hooks/useHive';
+import { useLiveSlots } from '@/hooks/useLiveSlots';
 import { useProjects } from '@/hooks/useProjects';
 import { useResolvedGodName } from '@/hooks/useResolvedGodName';
 import { useGodNameSync } from '@/i18n/useGodNameSync';
@@ -15,6 +16,7 @@ import { MemoryPanel } from '@/components/MemoryPanel';
 import { AgentDetailPanel } from '@/components/AgentDetailPanel';
 import { AgentStrip } from '@/components/AgentStrip';
 import { AddAgentModal } from '@/components/AddAgentModal';
+import { RolePickerPanel } from '@/components/RolePickerPanel';
 import { MichaelBooting } from '@/components/MichaelBooting';
 import { OnboardingWizard } from '@/components/OnboardingWizard';
 import { HivePicker } from '@/components/HivePicker';
@@ -50,11 +52,14 @@ export function App() {
   useArabicTerminalSync();
   const agent = useStore(selectedAgent);
   const agents = useStore(s => s.agents);
+  const activeProjectId = useStore(s => s.activeProjectId);
   const agentCount = agents.length;
   const hasGod = agents.some((a) => a.isGod);
   const bootingGodName = useResolvedGodName();
   const addAgentOpen = useStore(s => s.addAgentOpen);
   const setAddAgentOpen = useStore(s => s.setAddAgentOpen);
+  const rolePickerOpen = useStore(s => s.rolePickerOpen);
+  const setRolePickerOpen = useStore(s => s.setRolePickerOpen);
   const clearPendingHires = useStore(s => s.clearPendingHires);
   const godStatus = useStore(s => s.godStatus);
   const godSpawnError = useStore(s => s.godSpawnError);
@@ -209,6 +214,7 @@ export function App() {
   // switch to a different one. With the launch picker skipped for configured
   // hives, having a harnessHome IS the "opened" signal.
   useHive(config?.harnessHome ? config : null);
+  useLiveSlots(config?.harnessHome ? config : null);
 
   // Pre-warm a persistent terminal for every live agent so its output is
   // buffered from spawn. Switching agents then re-attaches an already-rendered
@@ -217,27 +223,39 @@ export function App() {
     for (const a of agents) if (a.ptyId) acquireTerminal(a.ptyId);
   }, [agents]);
 
-  // Synthetic demo loop — CAGED (#5B). It must never animate alongside a live
-  // hive (it would fire fake envelope handoffs and step seeded agents). Run it
-  // only as an explicit showcase (VITE_CTH_DEMO=1 in dev) or on a genuinely
-  // empty floor, and stop it the instant the first real PTY agent appears
-  // (Michael always spawns, so in normal operation it effectively never runs).
+  // Synthetic demo loop — CAGED (#5B). On-demand floors keep real seats with
+  // NO ptyId while idle; the old `!hasLive` fallback treated those seats as
+  // demo puppets and left them "heading to shelf / running tests" with an
+  // empty task board. Only run under the explicit showcase flag.
   useEffect(() => {
     if (!config?.onboardingComplete) return;
     const DEMO = import.meta.env.DEV && import.meta.env.VITE_CTH_DEMO === '1';
-    const evaluate = () => {
-      const hasLive = useStore.getState().agents.some((a) => a.ptyId);
-      if (DEMO || !hasLive) startMockLoop();
-      else stopMockLoop();
-    };
-    evaluate();
-    const unsub = useStore.subscribe(evaluate);
-    return () => { unsub(); stopMockLoop(); };
+    if (!DEMO) {
+      stopMockLoop();
+      // Clear any stuck fake busy state left by a prior mock run (e.g. race
+      // before god's PTY came up, or an old session that still had !hasLive).
+      const { agents, updateAgent } = useStore.getState();
+      for (const a of agents) {
+        if (a.ptyId || a.isGod || a.archived) continue;
+        if (a.status === 'working' || a.status === 'thinking' || a.status === 'compacting') {
+          updateAgent(a.id, {
+            status: 'idle',
+            action: 'idle',
+            carrying: undefined,
+            currentStation: 'desk'
+          });
+        }
+      }
+      return;
+    }
+    startMockLoop();
+    return () => { stopMockLoop(); };
   }, [config?.onboardingComplete]);
 
   // Reconcile restored agents against the PTYs still alive in the main process.
   // After a renderer reload (e.g. the laptop slept and Vite reloaded the page),
   // this keeps agents whose process survived and drops any that truly died.
+  // Also re-run on project switch so "reconnecting…" clears for resumed PTYs.
   useEffect(() => {
     if (!config?.onboardingComplete) return;
     let cancelled = false;
@@ -246,7 +264,7 @@ export function App() {
       useStore.getState().reconcileWithLivePtys(list.map((p) => p.id));
     }).catch(() => { /* ignore — keep restored agents as-is */ });
     return () => { cancelled = true; };
-  }, [config?.onboardingComplete]);
+  }, [config?.onboardingComplete, activeProjectId]);
 
   // Re-apply the persisted focus-mode preference as the roster fills in.
   //
@@ -466,7 +484,7 @@ export function App() {
                     <p style={{ margin: 0, fontSize: 13, lineHeight: '20px' }}>
                       {t('projects.emptyBody')}
                     </p>
-                    <PixelButton variant="primary" size="md" onClick={() => setAddAgentOpen(true)}>
+                    <PixelButton variant="primary" size="md" onClick={() => setRolePickerOpen(true)}>
                       <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
                         <Icon name="plus" /> {t('common.add')}
                       </span>
@@ -519,7 +537,7 @@ export function App() {
                 Spawn an agent from the strip below.<br />
                 The terminal and command bar will land here.
               </p>
-              <PixelButton variant="secondary" size="md" onClick={() => setAddAgentOpen(true)}>
+              <PixelButton variant="secondary" size="md" onClick={() => setRolePickerOpen(true)}>
                 <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
                   <Icon name="plus" /> add agent
                 </span>
@@ -530,6 +548,13 @@ export function App() {
       </div>
 
       <AgentStrip config={config} />
+
+      {rolePickerOpen && (
+        <RolePickerPanel
+          config={config}
+          onClose={() => setRolePickerOpen(false)}
+        />
+      )}
 
       {addAgentOpen && (
         <AddAgentModal

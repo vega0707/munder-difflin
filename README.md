@@ -30,7 +30,7 @@ visualized as avatars at work on a shared office floor.
 
 <p>
   <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-F4D35E.svg?style=flat-square&labelColor=6E1423"></a>
-  <a href="./CHANGELOG.md"><img alt="Version: 0.4.6" src="https://img.shields.io/badge/version-0.4.6-F4D35E.svg?style=flat-square&labelColor=6E1423"></a>
+  <a href="./CHANGELOG.md"><img alt="Version: 0.5.0" src="https://img.shields.io/badge/version-0.5.0-F4D35E.svg?style=flat-square&labelColor=6E1423"></a>
   <img alt="Status: pre-release" src="https://img.shields.io/badge/status-pre--release-F4F1EA.svg?style=flat-square&labelColor=6E1423">
   <img alt="Platform: macOS | Windows | Linux" src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-F4F1EA.svg?style=flat-square&labelColor=6E1423">
   <a href="./CONTRIBUTING.md"><img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-F4D35E.svg?style=flat-square&labelColor=6E1423"></a>
@@ -153,25 +153,14 @@ terminal/event plane, and [`DESIGN.md`](./DESIGN.md) for the visual system.
 - **Prerequisites** — one Settings page showing which supporting tools (uv, git, Node, MemPalace, each agent CLI) you have, what each is for, and a button that asks Michael to install what is missing.
 
 > [!NOTE]
-> **Status: v0.4.6, the release where the app stops assuming everyone reads English left to right.**
-> The interface now runs in Simplified Chinese and Arabic, with right to left support. English
-> stays the default and nothing changes until you pick a language in Settings, under General; the
-> app never reads your operating system locale. All three app fonts now ship inside the bundle
-> instead of loading from Google, which is blocked in mainland China and was breaking the interface
-> for exactly the people the Chinese translation was for. An input method Enter no longer fires a
-> send, a search or a rename while a candidate word is still being composed.
-> Every string is translated, with nothing falling back to English, and the terminals read right to
-> left. Some screens still need their padding and icons mirrored, and that is the next piece of
-> work. No Arabic reader has reviewed the wording yet.
-> Also in this release: the update badge runs the real download and restart instead of handing you
-> a disk image, the update check can no longer spin forever, Settings persists through one Save
-> button, the model lists moved into a checked in catalog, and the ASK ME card renders markdown.
-> On the security side: the name of the CLI an agent launches is validated before it is resolved
-> against your PATH, the OS sandbox stays on in auto mode, and analytics stopped sending IP and
-> derived location. Telemetry now counts the messages you send to an agent, a count and nothing
-> else, with no text, length or hash of the body in any shape.
-> 16 community pull requests from 13 contributors landed in this release, one of them (#213)
-> re-implemented rather than merged.
+> **Status: v0.5.0, the release that turns one office into many floors.**
+> You can keep several projects open as tabs, each with its own hive and cast. A seat hub lets
+> another machine take over a chair when this one dies. New floors can start from job-titled
+> templates (fullstack, product R&D, front/back split), and only a configurable number of agents
+> hold a live engine at once — everyone else stays on the floor until a slot frees. New agents
+> default to the built-in engine, and the god is not blocked by the live cap.
+> Languages from 0.4.6 still apply: English, Simplified Chinese and Arabic, with right to left
+> support. English stays the default. All three app fonts ship inside the bundle.
 > **If you're on 0.3.8, update:** that build's usage-limit guard never released the agents it held,
 > and it has been removed entirely.
 > macOS (signed & notarized), Windows, and Linux builds are on the
@@ -307,7 +296,9 @@ chrome. The 15 avatars are the cast of *The Office*, differentiated by hair/skin
 
 ## Roadmap
 
-Shipped through **v0.4.6**: a Simplified Chinese and Arabic interface with right to left support
+Shipped through **v0.5.0**: multiple floors (one hive per project) with a seat hub so another
+machine can take over a chair, job-titled dev templates, a global live-agent cap, a Simplified
+Chinese and Arabic interface with right to left support
 and self-hosted fonts, twelve agent engines with BYOK keys and local LLMs, voice orchestration,
 the hive (memory · mailboxes · blackboard · event log), Command Center with kanban and weekday
 schedules, a built-in Monaco IDE with git rails, integrations registry + secret broker,

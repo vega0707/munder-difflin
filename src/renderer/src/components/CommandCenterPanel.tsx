@@ -337,7 +337,7 @@ export function CommandCenterPanel({ agent, fullscreen = false }: { agent: Agent
           />
         )}
         {tab === 'activity' && <ActivityTab />}
-        {tab === 'skills' && <SkillsTab agentCwd={agent.cwd} />}
+        {tab === 'skills' && <SkillsTab agentCwd={agent.cwd} agentId={agent.id} />}
         {tab === 'workers' && <WorkersTab />}
       </div>
     </PixelPanel>
@@ -1298,9 +1298,9 @@ function ActivityTab() {
       <Section title={t('commandCenter.activity')}>
         {log.length === 0 && <Muted>{t('commandCenter.nothingYet')}</Muted>}
         {[...log].reverse().map((e, i) => (
-          <div key={i} style={{ fontSize: 12, color: 'var(--cth-ink-700)', padding: '2px 0', display: 'flex', gap: 6 }}>
+          <div key={i} style={{ fontSize: 12, color: 'var(--cth-ink-700)', padding: '2px 0', display: 'flex', gap: 6, overflowX: 'auto' }}>
             <span style={{ color: 'var(--cth-ink-300)', flexShrink: 0 }}>{e.kind ?? '·'}</span>
-            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fmt(e)}</span>
+            <span style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>{fmt(e)}</span>
           </div>
         ))}
       </Section>

@@ -6,12 +6,18 @@ import {
   type CreateProjectRole,
   type OfficeCharacterName
 } from './projectTypes';
+import {
+  BUILTIN_ROLES,
+  expandTemplateRoles,
+  type ProjectTemplateRole
+} from './roleCatalog';
 
 export interface ProjectTemplate {
   id: string;
   name: string;
   blurb: string;
-  roles: CreateProjectRole[];
+  /** Prefer `{ roleId }` refs; legacy inline CreateProjectRole still supported. */
+  roles: ProjectTemplateRole[];
   /** Built-in templates cannot be deleted. */
   builtin: boolean;
 }
@@ -30,7 +36,45 @@ export const BUILTIN_PROJECT_TEMPLATES: ProjectTemplate[] = [
     id: 'solo',
     name: 'Solo',
     blurb: 'One god, no workers. A quiet floor.',
-    roles: [{ character: 'michael', asGod: true }],
+    roles: [{ roleId: 'boss-solo', asGod: true }],
+    builtin: true
+  },
+  {
+    id: 'fullstack-squad',
+    name: 'Full-stack squad',
+    blurb: 'Tech lead plus FE, BE, and QA — a tight shipping crew.',
+    roles: [
+      { roleId: 'tech-lead', asGod: true },
+      { roleId: 'frontend' },
+      { roleId: 'backend' },
+      { roleId: 'qa' }
+    ],
+    builtin: true
+  },
+  {
+    id: 'product-rd',
+    name: 'Product R&D',
+    blurb: 'iClaw-style product crew: PM lead, architect, eng, QA, ops.',
+    roles: [
+      { roleId: 'pm', asGod: true },
+      { roleId: 'architect' },
+      { roleId: 'engineer' },
+      { roleId: 'fullstack-qa' },
+      { roleId: 'ops' }
+    ],
+    builtin: true
+  },
+  {
+    id: 'fe-be-split',
+    name: 'Front / back split',
+    blurb: 'Tech lead with frontend, backend, QA, and DevOps.',
+    roles: [
+      { roleId: 'tech-lead-split', asGod: true },
+      { roleId: 'frontend-pam' },
+      { roleId: 'backend-dwight' },
+      { roleId: 'qa-creed' },
+      { roleId: 'devops' }
+    ],
     builtin: true
   },
   {
@@ -38,9 +82,9 @@ export const BUILTIN_PROJECT_TEMPLATES: ProjectTemplate[] = [
     name: 'Accounting',
     blurb: 'Angela runs the floor. Oscar and Kevin keep the books.',
     roles: [
-      { character: 'angela', asGod: true },
-      { character: 'oscar' },
-      { character: 'kevin' }
+      { roleId: 'head-accounting', asGod: true },
+      { roleId: 'accountant-oscar' },
+      { roleId: 'accountant-kevin' }
     ],
     builtin: true
   },
@@ -49,23 +93,23 @@ export const BUILTIN_PROJECT_TEMPLATES: ProjectTemplate[] = [
     name: 'Sales',
     blurb: 'Dwight in the chair. Jim, Stanley, and Phyllis on the phones.',
     roles: [
-      { character: 'dwight', asGod: true },
-      { character: 'jim' },
-      { character: 'stanley' },
-      { character: 'phyllis' }
+      { roleId: 'assistant-rm', asGod: true },
+      { roleId: 'sales-jim' },
+      { roleId: 'sales-stanley' },
+      { roleId: 'sales-phyllis' }
     ],
     builtin: true
   },
   {
     id: 'corporate',
     name: 'Corporate',
-    blurb: 'Michael plus a tight management row. Five seats, at the live-PTY cap.',
+    blurb: 'Michael plus a tight management row. Five seats on the opening floor.',
     roles: [
-      { character: 'michael', asGod: true },
-      { character: 'jim' },
-      { character: 'pam' },
-      { character: 'dwight' },
-      { character: 'angela' }
+      { roleId: 'regional-manager', asGod: true },
+      { roleId: 'sales-jim-corp' },
+      { roleId: 'reception' },
+      { roleId: 'assistant-rm-dwight' },
+      { roleId: 'accounting-lead' }
     ],
     builtin: true
   },
@@ -74,10 +118,10 @@ export const BUILTIN_PROJECT_TEMPLATES: ProjectTemplate[] = [
     name: 'Party Planning',
     blurb: 'Pam chairs the committee. Angela, Phyllis, and Meredith bring the cake.',
     roles: [
-      { character: 'pam', asGod: true },
-      { character: 'angela' },
-      { character: 'phyllis' },
-      { character: 'meredith' }
+      { roleId: 'party-chair', asGod: true },
+      { roleId: 'party-angela' },
+      { roleId: 'party-phyllis' },
+      { roleId: 'party-meredith' }
     ],
     builtin: true
   }
@@ -90,8 +134,12 @@ export function templateById(
   return templates.find((t) => t.id === id);
 }
 
-export function rolesFromTemplate(template: ProjectTemplate): CreateProjectRole[] {
-  return template.roles.map((r) => ({ character: r.character, asGod: !!r.asGod }));
+/** Expand roleId refs (and legacy inline roles) to CreateProjectRole[]. */
+export function rolesFromTemplate(
+  template: ProjectTemplate,
+  catalog = BUILTIN_ROLES
+): CreateProjectRole[] {
+  return expandTemplateRoles(template.roles, catalog).map((r) => ({ ...r, asGod: !!r.asGod }));
 }
 
 export function isBuiltinTemplateId(id: string): boolean {
@@ -113,15 +161,11 @@ export function parseUserTemplateDraft(input: UserTemplateDraft): {
 } {
   const name = assertProjectName(input.name);
   const parsed = assertCreateProjectRoles(input.roles);
-  const roles: CreateProjectRole[] = [
-    { character: parsed.godCharacter, asGod: true },
-    ...parsed.extraCharacters.map((character) => ({ character, asGod: false }))
-  ];
   const blurb = typeof input.blurb === 'string' ? input.blurb.trim().slice(0, 160) : '';
   return {
     name,
     blurb: blurb || `Saved floor: ${parsed.godName} as god.`,
-    roles,
+    roles: parsed.roles,
     godCharacter: parsed.godCharacter
   };
 }

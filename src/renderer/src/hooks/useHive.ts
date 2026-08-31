@@ -426,19 +426,26 @@ export function useHive(config: HarnessConfig | null): void {
         if (!cancelled) useStore.getState().setGodStatus('ready');
         return;
       }
-      // Already on the floor from roster/localStorage — don't tear down and respawn.
-      if (useStore.getState().agents.some((a) => a.id === godId && a.isGod)) {
+      // Roster/local floor may already show a god avatar with no live PTY (e.g.
+      // after project switch). That is 划水, not "already clocked in" — only skip
+      // spawn when this seat already has a terminal, or intentionally runs builtin.
+      const existingGod = useStore.getState().agents.find((a) => a.id === godId && a.isGod);
+      if (existingGod?.ptyId) {
+        if (!cancelled) useStore.getState().setGodStatus('ready');
+        return;
+      }
+      const godName = resolveGodName(reg?.agents?.[godId]?.name);
+      const godProvider = resolveAgentProvider(
+        (reg?.agents?.[godId]?.provider as AgentProvider | undefined) ?? config.godProvider
+      );
+      if (existingGod && !providerNeedsPty(godProvider)) {
         if (!cancelled) useStore.getState().setGodStatus('ready');
         return;
       }
       if (cancelled || godSpawning.current) return;
       godSpawning.current = true;
-      useStore.getState().removeAgent(godId);
+      if (!existingGod) useStore.getState().removeAgent(godId);
 
-      const godName = resolveGodName(reg?.agents?.[godId]?.name);
-      const godProvider = resolveAgentProvider(
-        (reg?.agents?.[godId]?.provider as AgentProvider | undefined) ?? config.godProvider
-      );
       const godModel = config.godModel;
       const registryCwd = reg?.agents?.[godId]?.cwd;
       const godCwd = (typeof registryCwd === 'string' && registryCwd.trim())
@@ -474,7 +481,8 @@ export function useHive(config: HarnessConfig | null): void {
         name: godName,
         character: godCharacter,
         accent: 'lemon',
-        description: 'god — runs the floor, triages requests, escalates only critical calls to you',
+        description: existingGod?.description
+          || 'god — runs the floor, triages requests, escalates only critical calls to you',
         project: 'hive',
         tmuxTarget: '',
         cwd: res.cwd ?? godCwd,
@@ -489,7 +497,8 @@ export function useHive(config: HarnessConfig | null): void {
         isGod: true,
         recentTextTs: Date.now()
       };
-      useStore.getState().addAgent(god);
+      if (existingGod) useStore.getState().updateAgent(godId, god);
+      else useStore.getState().addAgent(god);
       useStore.getState().setGodStatus('ready');
 
       const resumedGod = res.resumed === true;
@@ -655,10 +664,12 @@ export function useHive(config: HarnessConfig | null): void {
       if (seenTerminalHandoffs.current.has(msg.id)) return;
       const { agents, enqueueMessage, messageQueues } = useStore.getState();
       const target = agents.find((a) => a.id === msg.to);
-      if (target?.ptyId) {
+      if (target && !target.archived) {
         const marker = `Message: ${msg.id}`;
         if ((messageQueues[target.id] ?? []).some((queued) => queued.text.includes(marker))) return;
         seenTerminalHandoffs.current.add(msg.id);
+        // Queue even without a live PTY — ensureLiveSlots pulls the seat up
+        // (or marks waiting-for-live-slot when the cap is full).
         enqueueMessage(target.id, terminalWorkOrderPrompt(msg));
         return;
       }
@@ -668,7 +679,7 @@ export function useHive(config: HarnessConfig | null): void {
         [
           `Terminal handoff failed for ${msg.to}: ${msg.subject}`,
           '',
-          `Message ${msg.id} from ${msg.from} could not be queued because ${msg.to} has no live PTY. Route it manually or respawn the agent.`
+          `Message ${msg.id} from ${msg.from} could not be queued because ${msg.to} is not on the floor. Route it manually or restore the seat.`
         ].join('\n')
       );
     });

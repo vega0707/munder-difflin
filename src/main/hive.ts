@@ -38,6 +38,7 @@ import {
   type AgentProvider
 } from '../shared/agentProvider';
 import { MCP_CATALOG } from '../shared/mcpCatalog';
+import { seatMcpEnabledMap, seatSkillAllowed, parseSeatAllowlist } from '../shared/seatTools';
 import { selectBroadcastTargets } from '../shared/broadcast';
 import { preferredAgentRole } from '../shared/agentRole';
 import { mergeTaskLedger } from '../shared/taskLedger';
@@ -143,6 +144,16 @@ export interface AgentMeta {
   /** Michael's prep assistant — enriches prompts and forwards them to Michael.
    *  Send-only: excluded from broadcast fan-out so it never drains an inbox. */
   isAssistant?: boolean;
+  /**
+   * Per-seat bundled-skill allowlist (folder names under app skills/).
+   * Omit/undefined = inherit all bundled skills; [] = none.
+   */
+  skills?: string[];
+  /**
+   * Per-seat MCP catalog-id allowlist.
+   * Omit/undefined = inherit floor mcpDefaults; [] = none.
+   */
+  mcp?: string[];
 }
 
 export interface RegistryAgent extends AgentMeta {
@@ -685,7 +696,14 @@ export class HiveManager {
     // app-resources skills/ dir on every spawn (same policy as identity.md), so an
     // agent always rides with the shipped safe skill set. Tolerant: a missing or
     // partial source dir is a no-op (Kevin populates the resource dir in lp-manifest).
-    if (opts.skillsDir) this.copyBundledSkills(opts.skillsDir, join(dir, '.claude', 'skills'));
+    // Per-seat `skills` allowlist (when set) copies only those folders.
+    if (opts.skillsDir) {
+      this.copyBundledSkills(
+        opts.skillsDir,
+        join(dir, '.claude', 'skills'),
+        parseSeatAllowlist(meta.skills ?? prev?.skills)
+      );
+    }
 
     const memory = join(dir, 'memory.md');
     if (!existsSync(memory)) {
@@ -926,7 +944,14 @@ export class HiveManager {
     if (sock && shim) {
       env.HIVE_SOCK = sock;
       const settingsPath = join(dir, 'settings.json');
-      this.writeJson(settingsPath, this.hookSettings(shim, meta.cwd, opts.mcpDefaults, opts.theme, this.sandboxWritableDirs(meta, dir, root, opts.extraWritableDirs)));
+      this.writeJson(settingsPath, this.hookSettings(
+        shim,
+        meta.cwd,
+        opts.mcpDefaults,
+        opts.theme,
+        this.sandboxWritableDirs(meta, dir, root, opts.extraWritableDirs),
+        parseSeatAllowlist(meta.mcp ?? prev?.mcp)
+      ));
       args.push('--settings', settingsPath);
     }
     return { args, env };
@@ -951,6 +976,35 @@ export class HiveManager {
       this.appendLog({ kind: 'role', agentId: id, role: next });
       this.commit(`hive: role ${id}`);
       return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  /** Persist per-seat skill / MCP allowlists. Takes effect on next spawn. */
+  patchAgentTools(
+    id: string,
+    patch: { skills?: string[] | null; mcp?: string[] | null }
+  ): { ok: boolean; error?: string; skills?: string[]; mcp?: string[] } {
+    const root = this.root();
+    if (!root) return { ok: false, error: 'hive disabled' };
+    try {
+      const reg = this.registry();
+      const agent = reg.agents[id];
+      if (!agent) return { ok: false, error: 'unknown agent' };
+      if ('skills' in patch) {
+        if (patch.skills === null) delete agent.skills;
+        else agent.skills = parseSeatAllowlist(patch.skills) ?? [];
+      }
+      if ('mcp' in patch) {
+        if (patch.mcp === null) delete agent.mcp;
+        else agent.mcp = parseSeatAllowlist(patch.mcp) ?? [];
+      }
+      agent.lastSeen = Date.now();
+      this.writeJson(join(root, 'registry.json'), reg);
+      this.appendLog({ kind: 'tools', agentId: id, skills: agent.skills, mcp: agent.mcp });
+      this.commit(`hive: tools ${id}`);
+      return { ok: true, skills: agent.skills, mcp: agent.mcp };
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
     }
@@ -1107,7 +1161,14 @@ export class HiveManager {
     return Array.from(new Set(out));
   }
 
-  private hookSettings(shim: string, cwd: string, cfg: McpDefaultsMap, theme?: 'light' | 'dark', writableDirs: string[] = []): unknown {
+  private hookSettings(
+    shim: string,
+    cwd: string,
+    cfg: McpDefaultsMap,
+    theme?: 'light' | 'dark',
+    writableDirs: string[] = [],
+    seatMcp?: string[]
+  ): unknown {
     // Bundled node, NOT bare `node` — see nodeLauncherPath(). Claude runs each of
     // these through `sh -c` with a stripped PATH, where `node` is often absent.
     const cmd = this.nodeRun(shim);
@@ -1115,7 +1176,7 @@ export class HiveManager {
       ...(matcher ? { matcher } : {}),
       hooks: [{ type: 'command', command: cmd }]
     });
-    const mcpServers = this.buildDefaultMcpServers(cwd, cfg);
+    const mcpServers = this.buildDefaultMcpServers(cwd, cfg, seatMcp);
     return {
       // Match the TUI's truecolor palette to the harness terminal theme —
       // PER SESSION, so the user's global Claude theme (their own terminals
@@ -1182,12 +1243,19 @@ export class HiveManager {
    */
   private buildDefaultMcpServers(
     cwd: string,
-    cfg: McpDefaultsMap
+    cfg: McpDefaultsMap,
+    seatMcp?: string[]
   ): Record<string, { command: string; args: string[]; env?: Record<string, string> }> {
+    const enabledMap = seatMcpEnabledMap(
+      cfg,
+      MCP_CATALOG.map((e) => e.id),
+      (id) => MCP_CATALOG.find((e) => e.id === id)?.defaultEnabled ?? false,
+      seatMcp
+    );
     const out: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {};
     for (const e of MCP_CATALOG) {
       const consented = cfg?.[e.id]?.enabled;
-      const enabled = consented ?? e.defaultEnabled;
+      const enabled = enabledMap[e.id]?.enabled ?? false;
       if (!enabled) continue;
       // Defense-in-depth: a write/secret server requires an EXPLICIT opt-in; it can
       // never ride in on a default (the catalog already ships these OFF, but this
@@ -1211,22 +1279,35 @@ export class HiveManager {
    * the app. Best-effort and fully tolerant — a missing/empty source dir is a no-op
    * (Kevin populates the resource dir in lp-manifest), and any IO error is swallowed
    * so skill provisioning can never block a spawn.
+   * When `seatSkills` is set, only those skill folders are copied (isolation).
    */
-  private copyBundledSkills(srcDir: string, destDir: string): void {
+  private copyBundledSkills(srcDir: string, destDir: string, seatSkills?: string[]): void {
     try {
       if (!existsSync(srcDir)) return;
-      const copyTree = (from: string, to: string): void => {
-        const entries = readdirSync(from, { withFileTypes: true });
-        if (!entries.length) return;
-        mkdirSync(to, { recursive: true });
-        for (const ent of entries) {
-          const s = join(from, ent.name);
-          const d = join(to, ent.name);
-          if (ent.isDirectory()) copyTree(s, d);
-          else if (ent.isFile()) copyFileSync(s, d);
+      try { rmSync(destDir, { recursive: true, force: true }); } catch { /* fresh dest */ }
+      mkdirSync(destDir, { recursive: true });
+      const entries = readdirSync(srcDir, { withFileTypes: true });
+      for (const ent of entries) {
+        if (!ent.isDirectory() && !ent.isFile()) continue;
+        if (!seatSkillAllowed(ent.name, seatSkills)) continue;
+        const s = join(srcDir, ent.name);
+        const d = join(destDir, ent.name);
+        if (ent.isDirectory()) {
+          const copyTree = (from: string, to: string): void => {
+            const kids = readdirSync(from, { withFileTypes: true });
+            mkdirSync(to, { recursive: true });
+            for (const kid of kids) {
+              const ks = join(from, kid.name);
+              const kd = join(to, kid.name);
+              if (kid.isDirectory()) copyTree(ks, kd);
+              else if (kid.isFile()) copyFileSync(ks, kd);
+            }
+          };
+          copyTree(s, d);
+        } else if (ent.isFile()) {
+          copyFileSync(s, d);
         }
-      };
-      copyTree(srcDir, destDir);
+      }
     } catch (e) { console.error('[hive] copyBundledSkills failed:', e); }
   }
 

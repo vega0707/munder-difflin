@@ -13,6 +13,7 @@ import {
   canDeleteProject,
   ProjectCreateError,
   wouldExceedActiveLimit,
+  resolveMaxActiveAgents,
   type ProjectMeta,
   type ProjectErrorCode,
   type CreateProjectRole,
@@ -64,6 +65,8 @@ export class ProjectRegistry {
   constructor(private opts: {
     persist: PersistStore;
     getHarnessHome: () => string | null;
+    /** Global live-PTY cap (all projects). Defaults to MAX_ACTIVE_AGENTS. */
+    getMaxActiveAgents?: () => number;
     pty?: ProjectPtyHost;
     emit?: (channel: string, payload: unknown) => boolean | void;
     onProjectReady?: (hive: HiveManager) => void;
@@ -171,9 +174,7 @@ export class ProjectRegistry {
       mkdirSync(projectRoot, { recursive: true });
       const hive = new HiveManager(() => projectRoot, this.opts.emit, projectId);
       await seedProjectCast(hive, {
-        godCharacter: parsed.godCharacter,
-        godName: parsed.godName,
-        extraCharacters: parsed.extraCharacters,
+        roles: parsed.roles,
         cwd,
         provider: input.provider
       });
@@ -238,16 +239,18 @@ export class ProjectRegistry {
         ? pty.countProjectSessions(fromId, { runningOnly: true })
         : 0;
       const targetProjectSessions = pty.countProjectSessions(projectId);
+      const limit = resolveMaxActiveAgents(this.opts.getMaxActiveAgents?.());
       if (wouldExceedActiveLimit({
         platform: process.platform,
         currentActive,
         oldProjectRunning,
-        targetProjectSessions
+        targetProjectSessions,
+        limit
       })) {
         return {
           ok: false,
           code: 'RESUME_LIMIT_REACHED',
-          error: 'resuming this floor would run more than 5 agents at once'
+          error: `resuming this floor would run more than ${limit} agents at once`
         };
       }
       if (fromId) pty.suspendProject(fromId);

@@ -303,6 +303,7 @@ export interface HarnessConfig {
    *  Entry point B (hold-Option-to-talk) is handled in the renderer, no hotkey. */
   freeflowEnabled?: boolean;
   groqApiKey?: string;
+  freeflowProvider?: 'groq' | 'siliconflow';
   freeflowModel?: string;
   /** Realtime Michael voice loop — true ONLY while a session holds the mic
    *  (renderer session sets it at start()/stop()); the main mic permission gate
@@ -595,6 +596,9 @@ const api = {
     ipcRenderer.invoke('pty:redraw', id),
   killPty: (id: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('pty:kill', id),
+  /** Kill the engine but keep the seat on the floor (on-demand runtime). */
+  parkPty: (id: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('pty:park', id),
   listPtys: (): Promise<Array<{
     id: string;
     cwd: string;
@@ -809,6 +813,32 @@ const api = {
     >,
   projectDeleteTemplate: (id: string) =>
     ipcRenderer.invoke('project:deleteTemplate', id) as Promise<{ ok: true } | { ok: false; error: string }>,
+  roleList: () =>
+    ipcRenderer.invoke('role:list') as Promise<Array<{
+      id: string; title: string; description: string; character: string;
+      skills?: string[]; mcp?: string[]; builtin: boolean; source?: string;
+    }>>,
+  roleSave: (input: {
+    title: string; description: string; character: string;
+    skills?: string[]; mcp?: string[]; source?: string;
+  }) =>
+    ipcRenderer.invoke('role:save', input) as Promise<
+      | { ok: true; role: {
+          id: string; title: string; description: string; character: string;
+          skills?: string[]; mcp?: string[]; builtin: boolean; source?: string;
+        } }
+      | { ok: false; error: string }
+    >,
+  roleDelete: (id: string) =>
+    ipcRenderer.invoke('role:delete', id) as Promise<{ ok: true } | { ok: false; error: string }>,
+  roleProposeFromBrief: (input: { brief: string; cwd?: string }) =>
+    ipcRenderer.invoke('role:proposeFromBrief', input) as Promise<
+      | { ok: true; draft: {
+          title: string; description: string; character: string;
+          skills?: string[]; mcp?: string[]; source?: string;
+        }; via: 'cli' | 'heuristic' | 'json' }
+      | { ok: false; error: string }
+    >,
   seatList: (projectId?: string) =>
     ipcRenderer.invoke('seat:list', projectId) as Promise<Array<{
       agentId: string;
@@ -906,6 +936,11 @@ const api = {
   /** Persist a hire/job role to hive registry.json + identity.md (no respawn). */
   hivePatchAgentRole: (id: string, role: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('hive:patchAgentRole', id, role),
+  hivePatchAgentTools: (
+    id: string,
+    patch: { skills?: string[] | null; mcp?: string[] | null }
+  ): Promise<{ ok: boolean; error?: string; skills?: string[]; mcp?: string[] }> =>
+    ipcRenderer.invoke('hive:patchAgentTools', id, patch),
   /** Rename an agent's display name. Its id, hive directory, and PTY are unchanged. */
   hiveRenameAgent: (id: string, name: string): Promise<{ ok: boolean; name?: string; error?: string }> =>
     ipcRenderer.invoke('hive:renameAgent', id, name),
@@ -1410,7 +1445,7 @@ const api = {
   /** Persist Free Flow settings (flag / Groq key / model). The Groq key is stored
    *  in main config; entry point B (hold-Option) is renderer-side, no hotkey here. */
   freeflowSetConfig: (patch: {
-    enabled?: boolean; apiKey?: string; model?: string;
+    enabled?: boolean; apiKey?: string; model?: string; provider?: 'groq' | 'siliconflow';
   }): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke('freeflow:setConfig', patch),
   /** Transcribe one captured audio clip via Groq (the key stays in main; only the

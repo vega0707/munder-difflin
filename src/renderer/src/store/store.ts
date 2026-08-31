@@ -183,6 +183,7 @@ interface State {
   selectedId: string | null;
   feeds: Record<string, string[]>;
   addAgentOpen: boolean;
+  rolePickerOpen: boolean;
   fullscreenAgentId: string | null;
   /** Does the user work in focus mode by default? Persisted as a boolean, and
    *  written ONLY by an explicit toggle. Kept in the store rather than read once
@@ -328,6 +329,7 @@ interface State {
   /** Clear an agent's entire pending queue. */
   clearQueue: (agentId: string) => void;
   setAddAgentOpen: (open: boolean) => void;
+  setRolePickerOpen: (open: boolean) => void;
   /** Validated manifests waiting for one-at-a-time human review. */
   hireQueue: HireReviewQueue;
   enqueuePendingHires: (manifests: readonly HireManifest[]) => void;
@@ -521,7 +523,7 @@ function loadPersistedAgents(): Agent[] {
       ...a,
       progress: 0,
       status: 'idle',
-      action: 'reconnecting…',
+      action: a.ptyId ? 'reconnecting…' : (a.isGod ? 'running the floor' : 'idle'),
       currentStation: 'desk',
       carrying: undefined,
       recentTextTs: Date.now(),
@@ -698,6 +700,7 @@ export const useStore = create<State>((set, get) => ({
   selectedId: initialSelectedId,
   feeds: {},
   addAgentOpen: false,
+  rolePickerOpen: false,
   ccTabRequest: null,
   requestCommandCenterTab: (tab) =>
     set((s) => ({ ccTabRequest: { tab, seq: (s.ccTabRequest?.seq ?? 0) + 1 } })),
@@ -1028,8 +1031,18 @@ export const useStore = create<State>((set, get) => ({
     set((s) => {
       const live = new Set(livePtyIds);
       // Keep agents with no PTY (synthetic) or whose PTY is still alive.
-      const agents = s.agents.filter((a) => !a.ptyId || live.has(a.ptyId));
-      if (agents.length === s.agents.length) return s;
+      let agents = s.agents.filter((a) => !a.ptyId || live.has(a.ptyId));
+      // Clear the boot/switch placeholder once we know the terminal is live —
+      // otherwise "reconnecting…" sticks until the next hook event (which may
+      // never come if the CLI is idle).
+      agents = agents.map((a) => {
+        if (a.ptyId && live.has(a.ptyId) && /^reconnecting/.test(a.action || '')) {
+          return { ...a, action: a.isGod ? 'running the floor' : 'idle' };
+        }
+        return a;
+      });
+      if (agents.length === s.agents.length
+        && agents.every((a, i) => a === s.agents[i])) return s;
       // Workers whose terminal died with the previous session become restorable
       // (full spawn recipe retained) instead of silently vanishing. God and the
       // prep assistant are excluded — they auto-respawn at boot.
@@ -1051,6 +1064,7 @@ export const useStore = create<State>((set, get) => ({
       return { agents, feeds, selectedId, restorableAgents, fullscreenAgentId };
     }),
   setAddAgentOpen: (open) => set({ addAgentOpen: open }),
+  setRolePickerOpen: (open) => set({ rolePickerOpen: open }),
   hireQueue: EMPTY_HIRE_QUEUE,
   enqueuePendingHires: (manifests) => set((s) => ({
     hireQueue: enqueueHires(s.hireQueue, manifests)
@@ -1117,7 +1131,9 @@ function agentsFromRoster(raw: unknown): Agent[] {
     ...a,
     progress: 0,
     status: 'idle' as const,
-    action: 'reconnecting…',
+    // Only seats that had a live terminal expect a reconnect. Roster-only /
+    // 划水 seats never get hook traffic, so "reconnecting…" would stick forever.
+    action: a.ptyId ? 'reconnecting…' : (a.isGod ? 'running the floor' : 'idle'),
     currentStation: 'desk' as const,
     carrying: undefined,
     recentTextTs: Date.now()

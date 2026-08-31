@@ -15,11 +15,15 @@ require.cache[electron] = {
   exports: { app: { getPath: () => os.tmpdir() } }
 };
 
-const { MAX_ACTIVE_AGENTS, PROJECT_CHANNELS, canDeleteProject, wouldExceedActiveLimit } = loadTs('src/shared/projectTypes.ts');
+const { MAX_ACTIVE_AGENTS, PROJECT_CHANNELS, canDeleteProject, wouldExceedActiveLimit, resolveMaxActiveAgents } = loadTs('src/shared/projectTypes.ts');
 const { PersistStore } = loadTs('src/main/db.ts');
 
-test('MAX_ACTIVE_AGENTS is 5', () => {
+test('MAX_ACTIVE_AGENTS default is 5 and resolveMaxActiveAgents clamps', () => {
   assert.equal(MAX_ACTIVE_AGENTS, 5);
+  assert.equal(resolveMaxActiveAgents(undefined), 5);
+  assert.equal(resolveMaxActiveAgents(0), 1);
+  assert.equal(resolveMaxActiveAgents(99), 32);
+  assert.equal(resolveMaxActiveAgents(7), 7);
 });
 
 test('project channel names stay project:*', () => {

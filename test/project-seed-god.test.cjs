@@ -25,9 +25,11 @@ test('seedProjectCast registers exactly one god', async (t) => {
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const hive = new HiveManager(() => home, undefined, 'p1');
   await seedProjectCast(hive, {
-    godCharacter: 'dwight',
-    godName: 'Dwight',
-    extraCharacters: ['jim', 'pam'],
+    roles: [
+      { character: 'dwight', asGod: true },
+      { character: 'jim' },
+      { character: 'pam' }
+    ],
     cwd: home
   });
   const reg = hive.registry();
@@ -46,15 +48,39 @@ test('seedProjectCast god can use a CLI provider while extras stay builtin', asy
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const hive = new HiveManager(() => home, undefined, 'p1');
   await seedProjectCast(hive, {
-    godCharacter: 'dwight',
-    godName: 'Dwight',
-    extraCharacters: ['jim'],
+    roles: [
+      { character: 'dwight', asGod: true, title: 'Tech Lead' },
+      { character: 'jim', title: 'Engineer' }
+    ],
     cwd: home,
     provider: 'claude'
   });
   const reg = hive.registry();
   assert.equal(reg.agents.god.provider, 'claude');
+  assert.equal(reg.agents.god.role, 'Tech Lead');
   assert.equal(reg.agents.jim.provider, 'builtin');
+  assert.equal(reg.agents.jim.role, 'Engineer');
+});
+
+test('seedProjectCast writes title into roster description', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'md-seed-title-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const projectRoot = path.join(home, 'projects', 'p1');
+  fs.mkdirSync(projectRoot, { recursive: true });
+  const hive = new HiveManager(() => projectRoot, undefined, 'p1');
+  await seedProjectCast(hive, {
+    roles: [
+      { character: 'michael', asGod: true, title: '产品经理', description: '拆需求、排优先级、盯交付' },
+      { character: 'oscar', title: '软件架构师', description: '定边界与关键决策' }
+    ],
+    cwd: projectRoot
+  });
+  const roster = JSON.parse(fs.readFileSync(path.join(projectRoot, 'roster.json'), 'utf8'));
+  const god = roster.agents.find((a) => a.id === 'god');
+  const oscar = roster.agents.find((a) => a.id === 'oscar');
+  assert.equal(god.description, '拆需求、排优先级、盯交付');
+  assert.equal(oscar.description, '定边界与关键决策');
+  assert.equal(hive.registry().agents.god.role, '产品经理');
 });
 
 test('createProject refuses to run without a god role', async (t) => {
