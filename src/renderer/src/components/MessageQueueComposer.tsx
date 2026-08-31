@@ -52,6 +52,7 @@ export function MessageQueueComposer({ agent }: MessageQueueComposerProps) {
   // (hasGroqKey is boolean presence only — the key value never reaches the store).
   const freeflowEnabled = useStore((s) => s.freeflowEnabled);
   const hasGroqKey = useStore((s) => s.hasGroqKey);
+  const hasCtripAsrToken = useStore((s) => s.hasCtripAsrToken);
   const ff = useFreeflow();
   const ffMine = ff.targetAgentId === agent.id;
   const ffHint = !freeflowEnabled
@@ -383,7 +384,7 @@ export function MessageQueueComposer({ agent }: MessageQueueComposerProps) {
               <Icon name="plus" /> {t('queueComposer.files')}
             </span>
           </PixelButton>
-          {freeflowEnabled && <FreeFlowButton agentId={agent.id} hasGroqKey={hasGroqKey} />}
+          {freeflowEnabled && <FreeFlowButton agentId={agent.id} hasGroqKey={hasGroqKey} hasCtripAsrToken={hasCtripAsrToken} />}
           <PixelButton variant="primary" size="sm" onClick={queueIt} disabled={!canSend}>
             <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
               {t('commandBar.send')} <Icon name="arrow-right" />
@@ -553,12 +554,21 @@ function QueuedMessageRow(
  * another agent is mid-dictation it's disabled (one shared recorder). The actual
  * capture + Groq call live in the freeflow recorder singleton.
  *
- * When no Groq key is configured the button stays visible but disabled, with a
+ * When no STT credential is configured the button stays visible but disabled, with a
  * tooltip pointing to Settings — it never starts a recording, so getUserMedia and
- * the Groq STT call are never reached (preserving the zero-call-when-unavailable
- * guarantee). `hasGroqKey` is boolean presence only; the key value never gets here.
+ * the STT call are never reached (preserving the zero-call-when-unavailable
+ * guarantee). Groq/SiliconFlow keys and the ctrip env token are boolean presence
+ * only; the values never get here.
  */
-function FreeFlowButton({ agentId, hasGroqKey }: { agentId: string; hasGroqKey: boolean }) {
+function FreeFlowButton({
+  agentId,
+  hasGroqKey,
+  hasCtripAsrToken
+}: {
+  agentId: string;
+  hasGroqKey: boolean;
+  hasCtripAsrToken: boolean;
+}) {
   const { t } = useTranslation();
   const ff = useFreeflow();
   const [freeflowProvider, setFreeflowProvider] = useState<'groq' | 'siliconflow' | 'ctrip' | undefined>();
@@ -576,7 +586,7 @@ function FreeFlowButton({ agentId, hasGroqKey }: { agentId: string; hasGroqKey: 
   }, []);
   // Block while another agent's clip is recording/uploading (single recorder).
   const busyElsewhere = ff.status !== 'idle' && !mine;
-  const noKey = !hasGroqKey;
+  const noKey = freeflowProvider === 'ctrip' ? !hasCtripAsrToken : !hasGroqKey;
 
   const hintRef = useRef<HTMLSpanElement | null>(null);
   const iconRef = useRef<HTMLButtonElement | null>(null);

@@ -378,8 +378,12 @@
       "provider": "语音识别",
       "providerSiliconFlow": "硅基流动（国内直连，免费 SenseVoice）",
       "providerGroq": "Groq Whisper",
+      "providerCtrip": "携程 ASR（环境变量令牌）",
       "providerSiliconFlowHint": "国内可直连，无需代理。到 cloud.siliconflow.cn 免费注册，SenseVoice 不绑卡。",
       "providerGroqHint": "Groq 上的 Whisper，速度快。从国内直连经常返回 Forbidden，需要代理。",
+      "providerCtripHint": "使用本机环境变量 CXB_ASR_TOKEN，无需在此粘贴 API 密钥。",
+      "ctripTokenConfigured": "环境变量 CXB_ASR_TOKEN 已设置。",
+      "ctripTokenMissing": "未设置 CXB_ASR_TOKEN — 使用携程 ASR 前请先 export。",
       "groqKey": "Groq API 密钥",
       "groqPlaceholder": "gsk_...（在 console.groq.com 免费获取密钥）",
       "siliconflowKey": "硅基流动 API 密钥",
@@ -388,6 +392,7 @@
       "fast": "whisper-large-v3-turbo（快速）",
       "accurate": "whisper-large-v3（准确）",
       "sensevoice": "FunAudioLLM/SenseVoiceSmall（中文更好）",
+      "ctripAsr": "携程 ASR（代理）",
       "freeFlowHint": "两种听写方式：点击队列编辑器发送键上方的麦克风按钮（点击开始录音，再点一次转写）；或在查看任意智能体终端时按住 Option（⌥）说话、松手转写。两种方式都会把文字放进编辑器草稿，供你发送前检查。首次录音时 macOS 会请求麦克风权限。",
       "realtime": "实时 {{godName}}",
       "voiceChat": "与 {{godName}} 语音对话",
@@ -429,6 +434,7 @@
       "terminal": "终端",
       "floor": "监控",
       "tasks": "任务",
+      "flow": "流程",
       "human": "问我",
       "triggers": "触发器",
       "history": "历史",
@@ -514,7 +520,31 @@
     "openIssue": "GitHub Issue #{{num}}：{{title}}",
     "deliveryResumeAria": "恢复整个楼层的自动投递",
     "deliveryHoldAria": "暂停整个楼层的自动投递",
-    "openIdeAria": "打开 IDE"
+    "openIdeAria": "打开 IDE",
+    "flow": {
+      "emptyHint": "派发需求后，这里会出现步骤故事线：谁在做什么、每步产出什么。去「监控」页面向 God 派发任务即可开始。",
+      "floorOverview": "楼层总览",
+      "currentStep": "当前：{{step}}",
+      "waiting": "等待步骤…",
+      "retry": "重试",
+      "dynamicSummary": "动态摘要",
+      "output": "输出",
+      "noOutput": "暂无输出",
+      "goToAgent": "去看 Ta",
+      "noSteps": "还没有步骤，等待任务卡片写入。",
+      "step": {
+        "pending": "等待",
+        "running": "进行中",
+        "done": "完成",
+        "failed": "失败",
+        "skipped": "跳过"
+      },
+      "run": {
+        "in_progress": "进行中",
+        "success": "已完成",
+        "failed": "失败"
+      }
+    }
   },
   "rolePicker": {
     "title": "添加智能体",

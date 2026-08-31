@@ -290,6 +290,12 @@ interface State {
    *  by Settings on save. */
   hasGroqKey: boolean;
   setHasGroqKey: (has: boolean) => void;
+  /** Mirror of `CXB_ASR_TOKEN` presence (boolean only — the token lives in main's
+   *  env, never the store). Gates the Free Flow mic when ctrip is the STT provider.
+   *  Set by App on load via window.cth.freeflowCtripTokenPresent() and by Settings
+   *  on save. */
+  hasCtripAsrToken: boolean;
+  setHasCtripAsrToken: (has: boolean) => void;
   /** Mirror of BYOK OpenAI key presence (boolean only — the key lives in the main
    *  secret broker, never the store). Gates the Realtime Michael voice toggle the
    *  way hasGroqKey gates the Free Flow mic. Set by App on load via
@@ -945,6 +951,8 @@ export const useStore = create<State>((set, get) => ({
   setFreeflowEnabled: (on) => set({ freeflowEnabled: on }),
   hasGroqKey: false,
   setHasGroqKey: (has) => set({ hasGroqKey: has }),
+  hasCtripAsrToken: false,
+  setHasCtripAsrToken: (has) => set({ hasCtripAsrToken: has }),
   hasOpenAiKey: false,
   setHasOpenAiKey: (has) => set({ hasOpenAiKey: has }),
   officeTheme: 'office',

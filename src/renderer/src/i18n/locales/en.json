@@ -378,8 +378,12 @@
       "provider": "Speech-to-text",
       "providerSiliconFlow": "SiliconFlow (China, free SenseVoice)",
       "providerGroq": "Groq Whisper",
+      "providerCtrip": "Ctrip ASR (env token)",
       "providerSiliconFlowHint": "Works from mainland China without a proxy. Register at cloud.siliconflow.cn — no card needed for SenseVoice.",
       "providerGroqHint": "Fast Whisper on Groq. Often returns Forbidden from mainland China unless traffic is proxied.",
+      "providerCtripHint": "Uses the CXB_ASR_TOKEN environment variable on this machine — no API key to paste here.",
+      "ctripTokenConfigured": "CXB_ASR_TOKEN is set in the environment.",
+      "ctripTokenMissing": "CXB_ASR_TOKEN is not set — export it before using Ctrip ASR.",
       "groqKey": "Groq API key",
       "groqPlaceholder": "gsk_... (get a free key at console.groq.com)",
       "siliconflowKey": "SiliconFlow API key",
@@ -388,6 +392,7 @@
       "fast": "whisper-large-v3-turbo (fast)",
       "accurate": "whisper-large-v3 (accurate)",
       "sensevoice": "FunAudioLLM/SenseVoiceSmall (Chinese + multilingual)",
+      "ctripAsr": "Ctrip ASR (broker)",
       "freeFlowHint": "Two ways to dictate: click the mic button above Send in the queue composer (click to record, click again to transcribe), or — while viewing any agent's terminal — hold Option (⌥) to talk and release to transcribe. Either way the text lands in the composer draft for you to review before sending. macOS will ask for microphone permission the first time you record.",
       "realtime": "Realtime {{godName}}",
       "voiceChat": "Voice chat with {{godName}}",
@@ -429,6 +434,7 @@
       "terminal": "terminal",
       "floor": "monitor",
       "tasks": "tasks",
+      "flow": "flow",
       "human": "ask me",
       "triggers": "triggers",
       "history": "history",
@@ -514,7 +520,31 @@
     "openIssue": "GitHub Issue #{{num}}: {{title}}",
     "deliveryResumeAria": "Resume automatic delivery for the whole floor",
     "deliveryHoldAria": "Hold automatic delivery for the whole floor",
-    "openIdeAria": "Open the IDE"
+    "openIdeAria": "Open the IDE",
+    "flow": {
+      "emptyHint": "After you dispatch a request, the step-by-step story appears here — who is doing what and what each step produced. Use Monitor to dispatch via God.",
+      "floorOverview": "Floor overview",
+      "currentStep": "Current: {{step}}",
+      "waiting": "Waiting for steps…",
+      "retry": "Retry",
+      "dynamicSummary": "Activity summary",
+      "output": "Output",
+      "noOutput": "No output yet",
+      "goToAgent": "Go to agent",
+      "noSteps": "No steps yet — waiting for task cards.",
+      "step": {
+        "pending": "pending",
+        "running": "running",
+        "done": "done",
+        "failed": "failed",
+        "skipped": "skipped"
+      },
+      "run": {
+        "in_progress": "in progress",
+        "success": "completed",
+        "failed": "failed"
+      }
+    }
   },
   "rolePicker": {
     "title": "Add agent",

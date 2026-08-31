@@ -22,7 +22,7 @@ import { McpDefaultsSettings } from './McpDefaultsSettings';
 import { IntegrationsRegistry } from './IntegrationsRegistry';
 import { AiEnginesSettings } from './AiEnginesSettings';
 import { REALTIME_MODEL } from '@shared/realtimePricing';
-import { resolveSttProvider, STT_PROVIDERS, type SttProviderId } from '@shared/sttProviders';
+import { resolveSttProvider, STT_PROVIDERS, isSttProviderId, type SttProviderId } from '@shared/sttProviders';
 import { RealtimeDevicePicker } from '@/realtime/DevicePicker';
 import { CostHud } from '@/realtime/CostHud';
 import {
@@ -518,6 +518,7 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
   // --- Free Flow (voice dictation → message queue) ---
   const setFreeflowEnabledStore = useStore((s) => s.setFreeflowEnabled);
   const setHasGroqKeyStore = useStore((s) => s.setHasGroqKey);
+  const setHasCtripAsrTokenStore = useStore((s) => s.setHasCtripAsrToken);
   // Talk (Realtime Michael) is gated on the OpenAI key — read the live presence
   // boolean so the Realtime Michael section can show its enabled/disabled status.
   const hasOpenAiKey = useStore((s) => s.hasOpenAiKey);
@@ -546,12 +547,13 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
   const [freeflowEnabled, setFreeflowEnabled] = useState(config.freeflowEnabled !== false);
   const [groqKey, setGroqKey] = useState(config.groqApiKey ?? '');
   const [freeflowProvider, setFreeflowProvider] = useState<SttProviderId>(
-    config.freeflowProvider === 'siliconflow' ? 'siliconflow' : 'groq'
+    isSttProviderId(config.freeflowProvider) ? config.freeflowProvider : 'groq'
   );
   const [freeflowModel, setFreeflowModel] = useState(
     config.freeflowModel ?? resolveSttProvider(config.freeflowProvider).defaultModel
   );
   const [showGroqKey, setShowGroqKey] = useState(false);
+  const [ctripTokenPresent, setCtripTokenPresent] = useState<boolean | null>(null);
   const [freeflowBusy, setFreeflowBusy] = useState(false);
   const [freeflowNote, setFreeflowNote] = useState('');
   // rt-9 idle-tunable: realtime voice idle auto-disconnect window (ms); 0 = never.
@@ -585,11 +587,17 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
       setKgEnabled(kgOn);
       setFreeflowEnabled(cc.freeflowEnabled !== false);
       setGroqKey(cc.groqApiKey ?? '');
-      const provider: SttProviderId = cc.freeflowProvider === 'siliconflow' ? 'siliconflow' : 'groq';
+      const provider: SttProviderId = isSttProviderId(cc.freeflowProvider) ? cc.freeflowProvider : 'groq';
       setFreeflowProvider(provider);
       const stt = resolveSttProvider(provider);
       const saved = cc.freeflowModel;
       setFreeflowModel(stt.models.some((m) => m.id === saved) ? saved! : stt.defaultModel);
+      void window.cth.freeflowCtripTokenPresent().then((r) => {
+        if (alive) {
+          setCtripTokenPresent(r.present);
+          setHasCtripAsrTokenStore(r.present);
+        }
+      }).catch(() => { if (alive) setCtripTokenPresent(false); });
       setIdleDisconnectMs((c as HarnessConfig).realtimeIdleDisconnectMs ?? 180_000);
     }).catch(() => { /* keep prop-seeded values */ });
     window.cth.kgStatus().then((s) => { if (alive) setKgDocCount(s.docCount); })
@@ -790,9 +798,15 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
         model: freeflowModel.trim() || resolveSttProvider(freeflowProvider).defaultModel
       });
       setFreeflowEnabledStore(enabled);
-      // Mirror boolean key-presence so the voice button enables/disables live
-      // without an app restart (presence only — never the key value).
-      setHasGroqKeyStore(!!groqKey.trim());
+      // Mirror boolean credential presence so the voice button enables/disables live
+      // without an app restart (presence only — never the key/token value).
+      if (freeflowProvider === 'ctrip') {
+        const { present } = await window.cth.freeflowCtripTokenPresent();
+        setCtripTokenPresent(present);
+        setHasCtripAsrTokenStore(present);
+      } else {
+        setHasGroqKeyStore(!!groqKey.trim());
+      }
       setFreeflowNote('saved');
     } catch (e) {
       setFreeflowNote(e instanceof Error ? e.message : String(e));
@@ -2103,58 +2117,89 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
                               <select
                                 value={freeflowProvider}
                                 onChange={(e) => {
-                                  const id: SttProviderId = e.target.value === 'siliconflow' ? 'siliconflow' : 'groq';
-                                  setFreeflowProvider(id);
-                                  setFreeflowModel(resolveSttProvider(id).defaultModel);
+                                  const id = e.target.value;
+                                  const next: SttProviderId = isSttProviderId(id) ? id : 'groq';
+                                  setFreeflowProvider(next);
+                                  setFreeflowModel(resolveSttProvider(next).defaultModel);
                                 }}
                                 style={{ ...slackInputStyle }}
                               >
-                                <option value="siliconflow">{t('settings.voice.providerSiliconFlow')}</option>
-                                <option value="groq">{t('settings.voice.providerGroq')}</option>
+                                {(Object.keys(STT_PROVIDERS) as SttProviderId[]).map((id) => (
+                                  <option key={id} value={id}>
+                                    {t(id === 'siliconflow'
+                                      ? 'settings.voice.providerSiliconFlow'
+                                      : id === 'ctrip'
+                                        ? 'settings.voice.providerCtrip'
+                                        : 'settings.voice.providerGroq')}
+                                  </option>
+                                ))}
                               </select>
                               <span style={{ fontSize: 12, lineHeight: '16px', color: 'var(--cth-ink-500)' }}>
                                 {t(freeflowProvider === 'siliconflow'
                                   ? 'settings.voice.providerSiliconFlowHint'
-                                  : 'settings.voice.providerGroqHint')}
+                                  : freeflowProvider === 'ctrip'
+                                    ? 'settings.voice.providerCtripHint'
+                                    : 'settings.voice.providerGroqHint')}
                               </span>
                             </label>
 
-                            {/* STT API key — stored in main config, used only there. */}
-                            <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                              <span style={slackLabelStyle}>
-                                {t(freeflowProvider === 'siliconflow'
-                                  ? 'settings.voice.siliconflowKey'
-                                  : 'settings.voice.groqKey')}
-                              </span>
-                              <div style={{ display: 'flex', gap: 6 }}>
-                                <input
-                                  type={showGroqKey ? 'text' : 'password'}
-                                  value={groqKey}
-                                  onChange={(e) => setGroqKey(e.target.value)}
-                                  placeholder={t(freeflowProvider === 'siliconflow'
-                                    ? 'settings.voice.siliconflowPlaceholder'
-                                    : 'settings.voice.groqPlaceholder')}
-                                  style={{ ...slackInputStyle, fontFamily: 'var(--cth-font-mono)' }}
-                                />
-                                <PixelButton variant="secondary" size="sm" onClick={() => setShowGroqKey((v) => !v)} disabled={!groqKey}>
-                                  {showGroqKey ? t('common.hide') : t('common.show')}
-                                </PixelButton>
+                            {freeflowProvider === 'ctrip' ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                <span style={slackLabelStyle}>CXB_ASR_TOKEN</span>
+                                <span style={{
+                                  fontSize: 12,
+                                  lineHeight: '16px',
+                                  color: ctripTokenPresent
+                                    ? 'var(--cth-success-700, #2d6a4f)'
+                                    : 'var(--cth-danger-700, #9b2226)'
+                                }}>
+                                  {ctripTokenPresent === null
+                                    ? '…'
+                                    : ctripTokenPresent
+                                      ? t('settings.voice.ctripTokenConfigured')
+                                      : t('settings.voice.ctripTokenMissing')}
+                                </span>
                               </div>
-                            </label>
+                            ) : (
+                              /* STT API key — stored in main config, used only there. */
+                              <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                <span style={slackLabelStyle}>
+                                  {t(freeflowProvider === 'siliconflow'
+                                    ? 'settings.voice.siliconflowKey'
+                                    : 'settings.voice.groqKey')}
+                                </span>
+                                <div style={{ display: 'flex', gap: 6 }}>
+                                  <input
+                                    type={showGroqKey ? 'text' : 'password'}
+                                    value={groqKey}
+                                    onChange={(e) => setGroqKey(e.target.value)}
+                                    placeholder={t(freeflowProvider === 'siliconflow'
+                                      ? 'settings.voice.siliconflowPlaceholder'
+                                      : 'settings.voice.groqPlaceholder')}
+                                    style={{ ...slackInputStyle, fontFamily: 'var(--cth-font-mono)' }}
+                                  />
+                                  <PixelButton variant="secondary" size="sm" onClick={() => setShowGroqKey((v) => !v)} disabled={!groqKey}>
+                                    {showGroqKey ? t('common.hide') : t('common.show')}
+                                  </PixelButton>
+                                </div>
+                              </label>
+                            )}
 
-                            {/* Model picker */}
-                            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 280 }}>
-                              <span style={slackLabelStyle}>{t('settings.voice.model')}</span>
-                              <select
-                                value={freeflowModel}
-                                onChange={(e) => setFreeflowModel(e.target.value)}
-                                style={{ ...slackInputStyle, fontFamily: 'var(--cth-font-mono)' }}
-                              >
-                                {STT_PROVIDERS[freeflowProvider].models.map((m) => (
-                                  <option key={m.id} value={m.id}>{t(`settings.voice.${m.labelKey}`)}</option>
-                                ))}
-                              </select>
-                            </label>
+                            {/* Model picker — ctrip-broker has a fixed backend, no user choice. */}
+                            {STT_PROVIDERS[freeflowProvider].kind !== 'ctrip-broker' && (
+                              <label style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 280 }}>
+                                <span style={slackLabelStyle}>{t('settings.voice.model')}</span>
+                                <select
+                                  value={freeflowModel}
+                                  onChange={(e) => setFreeflowModel(e.target.value)}
+                                  style={{ ...slackInputStyle, fontFamily: 'var(--cth-font-mono)' }}
+                                >
+                                  {STT_PROVIDERS[freeflowProvider].models.map((m) => (
+                                    <option key={m.id} value={m.id}>{t(`settings.voice.${m.labelKey}`)}</option>
+                                  ))}
+                                </select>
+                              </label>
+                            )}
 
                             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                               <PixelButton variant="ghost" size="sm" onClick={() => saveFreeflow()} disabled={freeflowBusy}>

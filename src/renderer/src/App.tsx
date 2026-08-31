@@ -124,6 +124,10 @@ export function App() {
       // show the voice button disabled-with-tooltip when Free Flow is on but no
       // Groq key is set (Settings keeps this in sync on save).
       useStore.getState().setHasGroqKey(!!c.groqApiKey);
+      // Mirror CXB_ASR_TOKEN presence (boolean only) for ctrip Free Flow gating.
+      window.cth.freeflowCtripTokenPresent().then((r) => {
+        if (!cancelled) useStore.getState().setHasCtripAsrToken(r.present);
+      }).catch(() => { /* token check unavailable — mic stays gated for ctrip */ });
       // Mirror the active office theme so OfficeFloor renders it (gated on the
       // tvShowOffices flag; off = always the office). Settings keeps this synced.
       useStore.getState().setOfficeTheme(c.tvShowOffices ? (c.officeTheme ?? 'office') : 'office');
