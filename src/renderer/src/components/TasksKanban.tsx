@@ -30,11 +30,13 @@ export function TasksKanban() {
   const { t } = useTranslation();
   const agents = useStore((s) => s.agents);
   const [tasks, setTasks] = useState<HiveTask[]>([]);
+  const [assigneeFilter, setAssigneeFilter] = useState<string>('all');
   // Detail view: cards show just the title — clicking one opens the full
   // breakdown as an APP-WIDE overlay over the office floor (see
   // TaskDetailOverlay) — the content grows (contracts, deps, human Q&A), so it
   // gets the big stage instead of the narrow side panel.
   const openTaskDetail = useStore((s) => s.openTaskDetail);
+  const requestCommandCenterTab = useStore((s) => s.requestCommandCenterTab);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refresh = useCallback(async () => {
@@ -70,6 +72,18 @@ export function TasksKanban() {
         ?? id)
       : undefined;
 
+  const assigneeOptions = (() => {
+    const ids = new Set<string>();
+    for (const t of tasks) if (t.assignee) ids.add(t.assignee);
+    return [...ids].sort((a, b) => (nameFor(a) ?? a).localeCompare(nameFor(b) ?? b));
+  })();
+
+  const visible = assigneeFilter === 'all'
+    ? tasks
+    : assigneeFilter === 'unassigned'
+      ? tasks.filter((t) => !t.assignee)
+      : tasks.filter((t) => t.assignee === assigneeFilter);
+
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--cth-paper-200)', position: 'relative' }}>
       {/* Toolbar — read-only: the god is the ledger's writer. New work enters
@@ -80,8 +94,22 @@ export function TasksKanban() {
         borderBottom: '1px solid var(--cth-ink-300)'
       }}>
         <span style={{ fontFamily: 'var(--cth-font-display)', fontSize: 9, color: 'var(--cth-ink-500)' }}>
-          {t('kanban.count', { count: tasks.length })}
+          {t('kanban.count', { count: visible.length })}
         </span>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--cth-ink-500)' }}>
+          <span style={{ fontFamily: 'var(--cth-font-display)', fontSize: 8 }}>{t('kanban.filterAssignee')}</span>
+          <select
+            value={assigneeFilter}
+            onChange={(e) => setAssigneeFilter(e.target.value)}
+            style={selectStyle}
+          >
+            <option value="all">{t('kanban.filterAll')}</option>
+            <option value="unassigned">{t('kanban.unassigned')}</option>
+            {assigneeOptions.map((id) => (
+              <option key={id} value={id}>{nameFor(id)}</option>
+            ))}
+          </select>
+        </label>
         <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--cth-ink-300)' }}>
           {t('kanban.newWorkHint')}
         </span>
@@ -92,7 +120,7 @@ export function TasksKanban() {
         flex: 1, minHeight: 0, display: 'flex', gap: 8, padding: 10, overflowX: 'auto'
       }}>
         {COLUMNS.map((col) => {
-          const cards = tasks.filter((t) => t.status === col.key);
+          const cards = visible.filter((t) => t.status === col.key);
           return (
             <div key={col.key} style={{
               flex: '1 1 0', minWidth: 170, display: 'flex', flexDirection: 'column',
@@ -118,6 +146,7 @@ export function TasksKanban() {
                     assigneeName={nameFor(t.assignee)}
                     onOpen={() => openTaskDetail(t.id)}
                     onDismiss={() => dismissTask(t.id)}
+                    onOpenAskMe={waitsOnHuman(t) ? () => requestCommandCenterTab('human') : undefined}
                   />
                 ))}
               </div>
@@ -134,12 +163,13 @@ export function TasksKanban() {
 // assignee. Everything else (the full contract, deps, controls) lives in the
 // detail view a click away: a kanban card can carry a title at most.
 
-function TaskCard({ task, accent, assigneeName, onOpen, onDismiss }: {
+function TaskCard({ task, accent, assigneeName, onOpen, onDismiss, onOpenAskMe }: {
   task: HiveTask;
   accent: string;
   assigneeName?: string;
   onOpen: () => void;
   onDismiss: () => void;
+  onOpenAskMe?: () => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -169,12 +199,22 @@ function TaskCard({ task, accent, assigneeName, onOpen, onDismiss }: {
           )}
         </span>
         {waitsOnHuman(task) && (
-          <span title={t('kanban.needsYouTitle')} style={{
-            alignSelf: 'center', marginRight: 18, flexShrink: 0,
-            fontFamily: 'var(--cth-font-display)', fontSize: 10, padding: '2px 5px 1px',
-            background: 'var(--cth-lilac)', color: 'var(--cth-ink-900)',
-            boxShadow: 'inset 0 0 0 1px var(--cth-ink-300)'
-          }}>?</span>
+          <span
+            role={onOpenAskMe ? 'button' : undefined}
+            title={t('kanban.needsYouTitle')}
+            onClick={(e) => {
+              if (!onOpenAskMe) return;
+              e.stopPropagation();
+              onOpenAskMe();
+            }}
+            style={{
+              alignSelf: 'center', marginRight: 18, flexShrink: 0,
+              fontFamily: 'var(--cth-font-display)', fontSize: 10, padding: '2px 5px 1px',
+              background: 'var(--cth-lilac)', color: 'var(--cth-ink-900)',
+              boxShadow: 'inset 0 0 0 1px var(--cth-ink-300)',
+              cursor: onOpenAskMe ? 'pointer' : 'default'
+            }}
+          >?</span>
         )}
       </button>
       {/* Dismiss — sibling button (not nested) so it never triggers onOpen. */}

@@ -28,6 +28,8 @@ export interface AgentControlSnapshot {
   paused: boolean;
   halted: boolean;
   autoDeliveryPaused: boolean;
+  /** True while this agent is assignee of a kanban card waiting on Ask Me. */
+  awaitingHuman: boolean;
   gatedTools: string[];
   pendingSteers: number;
 }
@@ -36,6 +38,7 @@ interface AgentControl {
   paused: boolean;
   halted: boolean;
   autoDeliveryPaused: boolean;
+  awaitingHuman: boolean;
   gatedTools: Set<string>;
   steerQueue: string[];
 }
@@ -50,6 +53,7 @@ export class ControlRegistry {
         paused: false,
         halted: false,
         autoDeliveryPaused: false,
+        awaitingHuman: false,
         gatedTools: new Set(),
         steerQueue: []
       };
@@ -61,6 +65,16 @@ export class ControlRegistry {
   // ─── Operator actions (wired to IPC) ───────────────────────────────────────
 
   pause(id: string, on: boolean): void { this.ensure(id).paused = on; }
+  /**
+   * Hard gate from the Ask Me / humanQA ledger. Independent of operator
+   * pause/halt: `resume()` does NOT clear this — only the task sync does.
+   */
+  setAwaitingHuman(id: string, on: boolean): void {
+    this.ensure(id).awaitingHuman = on;
+  }
+  isAwaitingHuman(id: string): boolean {
+    return this.map.get(id)?.awaitingHuman ?? false;
+  }
   pauseAutoDelivery(id: string, on: boolean): void {
     this.ensure(id).autoDeliveryPaused = on;
   }
@@ -103,10 +117,17 @@ export class ControlRegistry {
     return this.map.get(id)?.autoDeliveryPaused ?? false;
   }
 
-  /** Whether a tool call should be denied (paused agent, or this tool gated). */
+  /** Whether a tool call should be denied (paused / awaiting human / tool gated). */
   toolDecision(id: string, tool: string): { deny: boolean; reason?: string } {
     const c = this.map.get(id);
     if (!c) return { deny: false };
+    if (c.awaitingHuman) {
+      return {
+        deny: true,
+        reason:
+          'Waiting on Ask Me — answer or dismiss the open human question on the kanban before this agent continues.'
+      };
+    }
     if (c.paused) return { deny: true, reason: 'Paused by operator — resume from the floor to continue.' };
     if (tool && c.gatedTools.has(tool)) return { deny: true, reason: `Tool ${tool} is gated by the operator.` };
     return { deny: false };
@@ -121,6 +142,7 @@ export class ControlRegistry {
       paused: c?.paused ?? false,
       halted: c?.halted ?? false,
       autoDeliveryPaused: c?.autoDeliveryPaused ?? false,
+      awaitingHuman: c?.awaitingHuman ?? false,
       gatedTools: c ? Array.from(c.gatedTools) : [],
       pendingSteers: c?.steerQueue.length ?? 0
     };

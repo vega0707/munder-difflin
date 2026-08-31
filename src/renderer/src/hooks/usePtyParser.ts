@@ -6,11 +6,12 @@ import { createAnsiStripper } from '@/components/ansiText';
 const TOOL_RE = /●\s+([A-Za-z][A-Za-z_]*)(?:\s+(.+))?/g;
 
 const TOOL_TO_STATION: Record<string, StationKind> = {
-  Read: 'shelf', Edit: 'shelf', Write: 'shelf', MultiEdit: 'shelf',
-  Grep: 'shelf', Glob: 'shelf',
-  Bash: 'terminal', BashOutput: 'terminal',
+  Read: 'shelf', Edit: 'desk', Write: 'desk', MultiEdit: 'desk', NotebookEdit: 'desk',
+  Grep: 'shelf', Glob: 'shelf', LS: 'shelf',
+  Bash: 'terminal', BashOutput: 'terminal', SlashCommand: 'terminal',
   WebFetch: 'web', WebSearch: 'web',
-  TodoWrite: 'board', TaskCreate: 'board', TaskUpdate: 'board'
+  TodoWrite: 'board', TaskCreate: 'board', TaskUpdate: 'board',
+  Task: 'mailbox', Skill: 'mcp'
 };
 
 /** Best-effort station for MCP automation tools seen in pty tool lines. */

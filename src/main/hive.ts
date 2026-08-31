@@ -329,6 +329,7 @@ export class HiveManager {
    * @param projectId Stable id of the project that owns this hive.
    */
   private emit?: (channel: string, payload: unknown) => boolean | void;
+  private onTasksCommitted: ((tasks: HiveTask[]) => void) | null = null;
 
   constructor(
     private getHome: () => string | null,
@@ -338,6 +339,11 @@ export class HiveManager {
     this.emit = emit
       ? (channel, payload) => emit(channel, withProjectId(payload, projectId))
       : undefined;
+  }
+
+  /** Called after every successful tasks.json merge (UI, god, webhook, …). */
+  setOnTasksCommitted(fn: ((tasks: HiveTask[]) => void) | null): void {
+    this.onTasksCommitted = fn;
   }
 
   /** Deliver mail addressed to `floor:<projectId>/<agentId>` into another hive.
@@ -2091,6 +2097,9 @@ export class HiveManager {
     this.appendLog({ kind: 'tasks', count: merged.length });
     this.syncRunProjection(merged as HiveTask[]);
     this.commit(`hive: tasks (${merged.length})`);
+    try { this.onTasksCommitted?.(merged as HiveTask[]); } catch (e) {
+      console.warn('[hive] onTasksCommitted failed:', e);
+    }
   }
 
   /** Append one card against the latest on-disk ledger. Renderer callers must

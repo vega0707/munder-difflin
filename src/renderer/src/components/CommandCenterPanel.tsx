@@ -8,6 +8,7 @@ import { PtyTerminalView } from './PtyTerminalView';
 import { MessageQueueComposer } from './MessageQueueComposer';
 import { TasksKanban } from './TasksKanban';
 import { AskMeTab } from './AskMeTab';
+import { HivePulse } from './HivePulse';
 import { TriggersTab } from './triggers/TriggersTab';
 import { TriggerHistoryTab } from './triggers/TriggerHistoryTab';
 import { WorkersTab } from './WorkersTab';
@@ -90,7 +91,18 @@ const TABS: { key: CCTab; labelKey: string; icon: Parameters<typeof Icon>[0]['na
  *  cols/rows and corrupt the display. */
 export function CommandCenterPanel({ agent, fullscreen = false }: { agent: Agent; fullscreen?: boolean }) {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<CCTab>('terminal');
+  const [tab, setTab] = useState<CCTab>(() => {
+    try {
+      const v = window.localStorage.getItem('cth.ccTab');
+      const keys = TABS.map((x) => x.key);
+      if (v && (keys as string[]).includes(v)) return v as CCTab;
+    } catch { /* noop */ }
+    return 'terminal';
+  });
+  const selectTab = (key: CCTab) => {
+    setTab(key);
+    try { window.localStorage.setItem('cth.ccTab', key); } catch { /* noop */ }
+  };
   // The trigger-history ledger has nothing to say until an outside party can
   // reach us, so its tab appears only once an org key or a webhook exists. This
   // is the first config-gated tab in the panel: TABS stays the canonical order
@@ -100,7 +112,7 @@ export function CommandCenterPanel({ agent, fullscreen = false }: { agent: Agent
   const showHistory = useStore(triggerHistoryVisible);
   // Never leave the panel parked on a tab that has just been hidden.
   useEffect(() => {
-    if (!showHistory && tab === 'trigger-history') setTab('terminal');
+    if (!showHistory && tab === 'trigger-history') selectTab('terminal');
   }, [showHistory, tab]);
   const visibleTabs = TABS.filter((t) => t.key !== 'trigger-history' || showHistory);
 
@@ -115,7 +127,7 @@ export function CommandCenterPanel({ agent, fullscreen = false }: { agent: Agent
     // Read the gate live rather than depending on it — as a dependency it would
     // re-fire a stale request the moment the tab appeared.
     if (key === 'trigger-history' && !triggerHistoryVisible(useStore.getState())) return;
-    setTab(key);
+    selectTab(key);
   }, [ccTabRequest]);
   // A task-detail "assign" pre-fills the Floor dispatch box and jumps to it.
   // Seeded via the store one-shot (the detail overlay lives app-wide now);
@@ -268,7 +280,7 @@ export function CommandCenterPanel({ agent, fullscreen = false }: { agent: Agent
         {visibleTabs.map((tabDef) => (
           <button
             key={tabDef.key}
-            onClick={() => setTab(tabDef.key)}
+            onClick={() => selectTab(tabDef.key)}
             style={{
               whiteSpace: 'nowrap',
               // grow to share any spare width (so the strip still spans the panel
@@ -293,6 +305,8 @@ export function CommandCenterPanel({ agent, fullscreen = false }: { agent: Agent
           </button>
         ))}
       </div>
+
+      <HivePulse />
 
       {/* Body */}
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
@@ -336,7 +350,7 @@ export function CommandCenterPanel({ agent, fullscreen = false }: { agent: Agent
         {tab === 'graph' && (
           <MemoryGraphPanel
             godId={agent.id}
-            onJumpToMemory={(id) => { setSelectedMemoryAgent(id); setTab('memory'); }}
+            onJumpToMemory={(id) => { setSelectedMemoryAgent(id); selectTab('memory'); }}
           />
         )}
         {tab === 'activity' && <ActivityTab />}

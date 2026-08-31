@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PixelButton } from './PixelButton';
 import { PixelBadge } from './PixelBadge';
 import { useStore } from '@/store/store';
 import { MarkdownPreview } from '@/markdown/MarkdownPreview';
-import { type HiveTask, type HumanQA, openQuestion, waitsOnHuman } from './hiveTasks';
+import { type HiveTask, openQuestion, waitsOnHuman } from './hiveTasks';
 import { compareByNewestAsk } from './askMeOrder';
 import { isComposingKey } from '@shared/imeGuard';
 import { useRtl } from '@/i18n/useDirection';
@@ -81,6 +81,17 @@ export function AskMeTab() {
   const waiting = tasks
     .filter(waitsOnHuman)
     .sort((a, b) => compareByNewestAsk(openQuestion(a), openQuestion(b)));
+
+  /** Assignees currently hard-gated (tools denied) until an Ask Me card clears. */
+  const gatedAssignees = useMemo(() => {
+    const names = new Set<string>();
+    for (const task of waiting) {
+      const id = task.assignee?.trim();
+      if (!id) continue;
+      names.add(nameFor(id) ?? id);
+    }
+    return [...names];
+  }, [waiting, agents, restorable]);
 
   /**
    * Apply `patch` to the OPEN humanQA entry of one card, on the RAW ledger.
@@ -167,6 +178,16 @@ export function AskMeTab() {
     // memory viewer uses. Pixelify Sans (font-ui) is too chunky for prose like
     // questions and answers. Display/badge bits keep their explicit faces.
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: 'var(--cth-paper-200)', padding: 10, display: 'flex', flexDirection: 'column', gap: 10, fontFamily: 'var(--cth-font-mono)' }}>
+      {gatedAssignees.length > 0 && (
+        <div style={{
+          padding: '8px 10px',
+          background: 'var(--cth-lilac-light, #ece2f5)',
+          boxShadow: 'inset 0 0 0 1px var(--cth-ink-300)',
+          fontSize: 12, lineHeight: '16px', color: 'var(--cth-ink-900)'
+        }}>
+          {translate('askMe.gateBanner', { count: gatedAssignees.length, agents: gatedAssignees.join(', ') })}
+        </div>
+      )}
       {waiting.length === 0 && (
         <div style={{ textAlign: 'center', padding: '24px 12px', color: 'var(--cth-ink-500)', fontSize: 12 }}>
           {translate('askMe.emptyTitle')}<br />

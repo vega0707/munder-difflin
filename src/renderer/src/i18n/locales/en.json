@@ -61,6 +61,7 @@
   },
   "agentControl": {
     "deliveryPaused": "queued messages held (whole floor)",
+    "awaitingHuman": "waiting on Ask Me — tools denied",
     "halting": "stopping after this step…",
     "steersQueued": "{{count}} notes waiting",
     "steerPlaceholder": "send this agent a note… (arrives as context on its next turn, nothing is typed into its terminal)",
@@ -106,7 +107,16 @@
     "viewAnswersHistory": "open the task detail with the full Q&A history",
     "blockingDownstream": "BLOCKING {{count}} DOWNSTREAM TASK",
     "blockingDownstreamPlural": "BLOCKING {{count}} DOWNSTREAM TASKS",
-    "more": "… +{{count}} more"
+    "more": "… +{{count}} more",
+    "gateBanner": "{{count}} assignee(s) hard-gated — tools denied until you answer or dismiss below. ({{agents}})"
+  },
+  "hivePulse": {
+    "title": "FLOOR PULSE",
+    "askMe": "Ask Me open",
+    "gated": "hard-gated",
+    "breakers": "breakers open",
+    "openAskMe": "open Ask Me",
+    "quiet": "Floor clear — no human gates, no open breakers."
   },
   "agentStrip": {
     "privateNote": "PRIVATE NOTE · {{name}}",
@@ -1406,6 +1416,8 @@
     "dismissAria": "dismiss task",
     "taskTitle": "TASK",
     "unassigned": "unassigned",
+    "filterAssignee": "ASSIGNEE",
+    "filterAll": "all",
     "noDescription": "(no description on this card)",
     "humanQA": "HUMAN Q&A",
     "awaitingAnswer": "AWAITING YOUR ANSWER — ASK ME TAB",
