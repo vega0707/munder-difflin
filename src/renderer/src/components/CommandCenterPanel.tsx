@@ -38,6 +38,7 @@ import {
 } from '@/store/config';
 import { canReceiveInbox } from '@shared/agentProvider';
 import { formatFloorAddress } from '@shared/floorAddress';
+import { FlowTab } from './FlowTab';
 import { isComposingKey } from '@shared/imeGuard';
 import { useRtl } from '@/i18n/useDirection';
 
@@ -49,7 +50,7 @@ import { useRtl } from '@/i18n/useDirection';
 // Both the AskMe (#human) tab and the Triggers tab live here. Triggers replaced
 // the old Schedules tab: schedules are now one of four trigger types, and the
 // whole surface lives in ./triggers (see src/shared/triggers.ts for the contract).
-type CCTab = 'terminal' | 'floor' | 'tasks' | 'human' | 'triggers' | 'trigger-history'
+type CCTab = 'terminal' | 'floor' | 'tasks' | 'flow' | 'human' | 'triggers' | 'trigger-history'
   | 'memory' | 'graph' | 'activity' | 'skills' | 'workers';
 
 /** Fallback denominator for the per-agent token meter when no floor token budget
@@ -72,6 +73,7 @@ const TABS: { key: CCTab; labelKey: string; icon: Parameters<typeof Icon>[0]['na
   { key: 'terminal', labelKey: 'commandCenter.tabs.terminal', icon: 'terminal' },
   { key: 'floor', labelKey: 'commandCenter.tabs.floor', icon: 'mcp' },
   { key: 'tasks', labelKey: 'commandCenter.tabs.tasks', icon: 'check' },
+  { key: 'flow', labelKey: 'commandCenter.tabs.flow', icon: 'ledger' },
   { key: 'human', labelKey: 'commandCenter.tabs.human', icon: 'bell' },
   { key: 'triggers', labelKey: 'commandCenter.tabs.triggers', icon: 'clock' },
   { key: 'trigger-history', labelKey: 'commandCenter.tabs.history', icon: 'ledger' },
@@ -324,6 +326,7 @@ export function CommandCenterPanel({ agent, fullscreen = false }: { agent: Agent
         )}
         {tab === 'floor' && <FloorTab seed={dispatchSeed} />}
         {tab === 'tasks' && <TasksKanban />}
+        {tab === 'flow' && <FlowTab />}
         {tab === 'human' && <AskMeTab />}
         {tab === 'triggers' && <TriggersTab />}
         {tab === 'trigger-history' && <TriggerHistoryTab />}

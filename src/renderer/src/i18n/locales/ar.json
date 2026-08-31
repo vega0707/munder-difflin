@@ -522,18 +522,28 @@
     "deliveryHoldAria": "احتجز التسليم التلقائي للأرضية كلها",
     "openIdeAria": "افتح بيئة التطوير",
     "flow": {
-      "emptyHint": "After you dispatch a request, the step-by-step story appears here.",
-      "floorOverview": "Floor overview",
-      "currentStep": "Current: {{step}}",
-      "waiting": "Waiting…",
-      "retry": "Retry",
-      "dynamicSummary": "Summary",
-      "output": "Output",
-      "noOutput": "No output",
-      "goToAgent": "Go to agent",
-      "noSteps": "No steps yet",
-      "step": { "pending": "pending", "running": "running", "done": "done", "failed": "failed", "skipped": "skipped" },
-      "run": { "in_progress": "in progress", "success": "done", "failed": "failed" }
+      "emptyHint": "بعد إرسال طلب، تظهر هنا قصة الخطوات — من يفعل ماذا وماذا أُنتج في كل خطوة. استخدم المراقبة للإرسال عبر الإله.",
+      "floorOverview": "نظرة عامة على الأرضية",
+      "currentStep": "الحالي: {{step}}",
+      "waiting": "في انتظار الخطوات…",
+      "retry": "أعد المحاولة",
+      "dynamicSummary": "ملخص النشاط",
+      "output": "المخرجات",
+      "noOutput": "لا مخرجات بعد",
+      "goToAgent": "انتقل إلى الوكيل",
+      "noSteps": "لا خطوات بعد — بانتظار بطاقات المهام.",
+      "step": {
+        "pending": "قيد الانتظار",
+        "running": "جارٍ",
+        "done": "تم",
+        "failed": "فشل",
+        "skipped": "تخطّي"
+      },
+      "run": {
+        "in_progress": "جارٍ",
+        "success": "اكتمل",
+        "failed": "فشل"
+      }
     }
   },
   "rolePicker": {

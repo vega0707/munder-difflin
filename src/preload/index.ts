@@ -50,6 +50,10 @@ export interface HiveAgentMeta {
   provider?: AgentProvider;
   role?: string;
   capabilities?: string[];
+  /** Per-seat bundled-skill allowlist (folder names). Omit = inherit all bundled. */
+  skills?: string[];
+  /** Per-seat MCP catalog-id allowlist. Omit = inherit floor mcpDefaults. */
+  mcp?: string[];
   cwd: string;
   isGod?: boolean;
   /** Michael's prep assistant — send-only; enriches prompts and forwards them. */
@@ -952,6 +956,14 @@ const api = {
   hiveBoard: (): Promise<string> => ipcRenderer.invoke('hive:board'),
   hiveTasks: (): Promise<unknown> => ipcRenderer.invoke('hive:tasks'),
   hiveLog: (n?: number): Promise<unknown[]> => ipcRenderer.invoke('hive:log', n ?? 200),
+  hiveRunFlowList: (): Promise<import('../shared/runFlow').RunRecord[]> =>
+    ipcRenderer.invoke('hive:runFlowList'),
+  hiveRunFlowDefaultView: (): Promise<import('../shared/runFlow').FlowDefaultView> =>
+    ipcRenderer.invoke('hive:runFlowDefaultView'),
+  hiveRunFlowGet: (id: string): Promise<import('../shared/runFlow').RunRecord | null> =>
+    ipcRenderer.invoke('hive:runFlowGet', id),
+  hiveRunFlowRetry: (id: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('hive:runFlowRetry', id),
   hiveMemory: (id: string): Promise<string> => ipcRenderer.invoke('hive:memory', id),
   hiveInbox: (id: string): Promise<HiveMessage[]> => ipcRenderer.invoke('hive:inbox', id),
   /** Voice read-layer: recent message CONTENT (inbox/outbox bodies), REDACTED in

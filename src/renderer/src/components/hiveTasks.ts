@@ -24,6 +24,7 @@ export interface HiveTask {
   /** First-class human feedback: the god appends {q} when a card needs the
    *  human; the ASK ME view fills in {a}. Full history stays on the card. */
   humanQA?: HumanQA[];
+  result?: string;
 }
 
 type Status = HiveTask['status'];
@@ -75,6 +76,7 @@ export function parseTasks(raw: unknown): HiveTask[] {
       dependsOn: Array.isArray(t.dependsOn) ? t.dependsOn.filter((d): d is string => typeof d === 'string') : [],
       priority: typeof t.priority === 'number' ? t.priority : 3,
       createdAt: typeof t.createdAt === 'string' ? t.createdAt : new Date().toISOString(),
+      result: typeof t.result === 'string' ? t.result : undefined,
       humanQA: Array.isArray(t.humanQA)
         ? (t.humanQA as unknown[])
           .filter((e): e is Record<string, unknown> => !!e && typeof e === 'object' && typeof (e as { q?: unknown }).q === 'string')

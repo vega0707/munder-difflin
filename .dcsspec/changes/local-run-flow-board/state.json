@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "ticketKey": "local",
+  "idev": null,
+  "title": "流程 Run 看板（类 Cursor）",
+  "changeName": "run-flow-board",
+  "changeId": "local-run-flow-board",
+  "branch": "cursor/multi-project-office-aaa5",
+  "repos": [],
+  "primaryRepo": "munder-difflin",
+  "openspecChange": "archive/2026-08-31-run-flow-board",
+  "specPath": [
+    "openspec/changes/archive/2026-08-31-run-flow-board/design.md"
+  ],
+  "planPath": [
+    "docs/superpowers/plans/2026-08-31-run-flow-board.md"
+  ],
+  "dcsspecDir": "docs/dcsspec/local-run-flow-board",
+  "currentStage": "archive",
+  "stages": {
+    "open": {
+      "status": "done",
+      "updatedAt": "2026-08-31T11:53:06Z",
+      "artifacts": [
+        "docs/dcsspec/local-run-flow-board/prd.md",
+        "done"
+      ]
+    },
+    "design": {
+      "status": "done",
+      "updatedAt": "2026-08-31T12:05:39Z",
+      "artifacts": [
+        "openspec/changes/run-flow-board/design.md",
+        "openspec/changes/run-flow-board/tasks.md",
+        "openspec/changes/run-flow-board/proposals/proposal-munder-difflin.md",
+        "docs/superpowers/plans/2026-08-31-run-flow-board.md",
+        "done"
+      ]
+    },
+    "build": {
+      "status": "done",
+      "updatedAt": "2026-08-31T12:21:34Z",
+      "artifacts": [
+        "done"
+      ]
+    },
+    "review": {
+      "status": "done",
+      "updatedAt": "2026-08-31T12:23:08Z",
+      "artifacts": [
+        "done"
+      ]
+    },
+    "verify": {
+      "status": "done",
+      "updatedAt": "2026-08-31T12:23:23Z",
+      "artifacts": [
+        "done"
+      ]
+    },
+    "qa-deploy": {
+      "status": "done",
+      "updatedAt": "2026-08-31T12:23:34Z",
+      "artifacts": [
+        "skipped: no GitLab/Captain for local Electron; acceptance via node:test"
+      ]
+    },
+    "submit-test": {
+      "status": "done",
+      "updatedAt": "2026-08-31T12:23:35Z",
+      "artifacts": [
+        "done"
+      ]
+    },
+    "archive": {
+      "status": "done",
+      "updatedAt": "2026-08-31T12:23:52Z",
+      "artifacts": [
+        "done"
+      ]
+    }
+  },
+  "gates": {
+    "planReviewPassed": true,
+    "acceptanceCasesPlanned": true,
+    "designApproved": true,
+    "brainstormingDone": true,
+    "codeSimplificationDone": true,
+    "gstackReviewDone": true,
+    "reviewCriticalOpen": 0,
+    "verifyPassed": true,
+    "acceptancePassed": true
+  },
+  "notes": "已决议（open 完成，供 design 承接，禁止重问）:\n目的: 命令中心「流程」Tab，Run 步骤看板+点开看动态/输出，解决焦点乱跳/故事线断/输出散落。\n约束: 不替换任务/动态；默认不切 agent；工单跳过(local)。\n成功标准: 有/无 plan 可读步骤；点开动态+输出；失败可回看并重试；多进行中楼层总览；历史跨会话；一步=一task。\n选型: Q1A Q2A Q3B Q4A Q5A Q6A Q7A+重试按钮 Q8B Q9A Q10B Q11A；失败重试覆盖原Q12不做。\n方案: Run时间线看板；IA §1已OK。\n不做: 对比/导出/双轨步骤/细碎状态机/空态派发台/默认跟焦。\n产物: docs/dcsspec/local-run-flow-board/prd.md\n重试语义: B 从失败步起往后重跑（该步及后续）。design 已承接 open，方案仍为 Run 时间线看板。\n\ndesign: 跳过 code-architect（单仓+plan 已含文件级 Task）；跳过 Baiji/database-agent；验收=node:test 表（无 AREX）。\n\nbuild: 多角色挑刺已消化(design/plan)；T1-T6 已实现；18 tests pass。\n\nverify: node --test run-projection+flow-tab+activity+hive-task-mutation = 18 pass; load-ts runFlow/runProjection OK.\nreview findings: Critical=0. Fixed ar flow i18n. Pre-existing: typecheck SttProviderId/useHive; arabic projects.* English leftovers.\nqa-deploy: SKIP — Electron 本地仓无 GitLab/Captain AppID；用户未要求 commit/push。submit-test 走 plan 的 node:test 表。\n\narchive: OpenSpec moved to openspec/changes/archive/2026-08-31-run-flow-board; archaeology skipped; maintainer-handoff skipped (user 跑完).\n"
+}

@@ -4128,6 +4128,16 @@ ipcMain.handle('hive:board', (_evt, projectId?: unknown) => hiveIPC(projectId).b
 ipcMain.handle('hive:tasks', (_evt, projectId?: unknown) => hiveIPC(projectId).tasks());
 ipcMain.handle('hive:log', (_evt, n: unknown, projectId?: unknown) =>
   hiveIPC(projectId).logTail(typeof n === 'number' ? n : 200));
+ipcMain.handle('hive:runFlowList', (_evt, projectId?: unknown) => hiveIPC(projectId).runFlowList());
+ipcMain.handle('hive:runFlowDefaultView', (_evt, projectId?: unknown) =>
+  hiveIPC(projectId).runFlowDefaultView());
+ipcMain.handle('hive:runFlowGet', (_evt, id: unknown, projectId?: unknown) =>
+  (typeof id === 'string' ? hiveIPC(projectId).runFlowGet(id) : null));
+ipcMain.handle('hive:runFlowRetry', (_evt, id: unknown, projectId?: unknown) => {
+  if (typeof id !== 'string' || !id) return { ok: false, error: 'invalid' };
+  if (!hiveIPC(projectId).enabled()) return { ok: false, error: 'hive disabled' };
+  return hiveIPC(projectId).runFlowRetry(id);
+});
 ipcMain.handle('hive:memory', (_evt, id: unknown, projectId?: unknown) =>
   (typeof id === 'string' ? hiveIPC(projectId).memory(id) : ''));
 ipcMain.handle('hive:inbox', (_evt, id: unknown, projectId?: unknown) =>

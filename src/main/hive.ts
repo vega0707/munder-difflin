@@ -42,6 +42,7 @@ import { seatMcpEnabledMap, seatSkillAllowed, parseSeatAllowlist } from '../shar
 import { selectBroadcastTargets } from '../shared/broadcast';
 import { preferredAgentRole } from '../shared/agentRole';
 import { mergeTaskLedger } from '../shared/taskLedger';
+import { RunProjectionStore } from './runProjection';
 import { expandTilde } from './fs';
 import { resolveGodName } from '../shared/godIdentity';
 import { parseFloorAddress, type FloorAddress } from '../shared/floorAddress';
@@ -118,6 +119,8 @@ export interface HiveTask {
    *  proceed with the human's input (status goes blocked); the harness UI
    *  fills in {a}. The full history stays on the card forever. */
   humanQA?: HumanQA[];
+  /** When set, ties this card to a Flow Run projection (`runs.json`). */
+  runId?: string;
   /** Outcome summary, surfaced by the Slack done-notifier when this card reaches
    *  'done'. Optional; the notifier falls back to description/title. */
   result?: string;
@@ -339,6 +342,67 @@ export class HiveManager {
   }
 
   private routerTimer: NodeJS.Timeout | null = null;
+  private _projection: RunProjectionStore | null = null;
+
+  private projection(): RunProjectionStore {
+    if (!this._projection) {
+      this._projection = new RunProjectionStore(() => this.root());
+    }
+    return this._projection;
+  }
+
+  /** Flow tab: list durable Run projections. */
+  runFlowList(): ReturnType<RunProjectionStore['list']> {
+    return this.projection().list();
+  }
+
+  runFlowDefaultView(): ReturnType<RunProjectionStore['defaultView']> {
+    return this.projection().defaultView();
+  }
+
+  runFlowGet(id: string): ReturnType<RunProjectionStore['get']> {
+    return this.projection().get(id);
+  }
+
+  /** Retry from the failed step onward; resets tasks and asks god to continue. */
+  // TODO[REENTRANCY]: retryInFlight latch rejects concurrent retries; clear only after send or abort.
+  // TODO[FAILURE_HANDLING]: send failure must abortRetry so the UI can retry again.
+  runFlowRetry(runId: string): { ok: boolean; error?: string } {
+    const before = this.projection().get(runId);
+    if (!before || before.status !== 'failed') return { ok: false, error: 'not-failed' };
+    const failStep = before.failedStepIndex != null
+      ? before.steps[before.failedStepIndex]
+      : before.steps.find((s) => s.status === 'failed');
+    const prep = this.projection().beginRetry(runId);
+    if (!prep.ok) return prep;
+    const ledger = this.tasks() as { tasks?: HiveTask[] };
+    const tasks = Array.isArray(ledger?.tasks) ? [...ledger.tasks] : [];
+    for (const taskId of prep.taskIdsToReset) {
+      const i = tasks.findIndex((t) => t?.id === taskId);
+      if (i >= 0) tasks[i] = { ...tasks[i], status: 'todo' };
+    }
+    this.writeTasks(tasks);
+    const run = this.projection().get(runId);
+    try {
+      this.send({
+        act: 'request',
+        conversation: run?.conversation ?? before.conversation,
+        subject: `Retry: ${failStep?.title ?? 'failed step'}`,
+        body: `Please continue this run from the failed step (${failStep?.taskId ?? 'unknown'}). Run id: ${runId}.`
+      }, 'human');
+      this.projection().finishRetry(runId);
+      return { ok: true };
+    } catch {
+      this.projection().abortRetry(runId);
+      return { ok: false, error: 'send-failed' };
+    }
+  }
+
+  private syncRunProjection(tasks: HiveTask[]): void {
+    try {
+      this.projection().syncFromTasks(tasks);
+    } catch { /* best-effort */ }
+  }
 
   /** The embedded OTLP collector's loopback URL, set by the main process once the
    *  collector is bound (telemetry.ts). null = telemetry off → no OTel env is
@@ -1593,6 +1657,9 @@ export class HiveManager {
   /** Inject a message directly (used by the orchestrator / UI / tests). */
   send(partial: Partial<HiveMessage>, from = 'system'): HiveMessage {
     const msg = this.normalize(partial, from);
+    if (from === 'human' && msg.act === 'request') {
+      try { this.projection().onHumanRequest(msg); } catch { /* best-effort */ }
+    }
     this.routeMessage(msg);
     this.commit(`hive: msg ${msg.from}→${msg.to} (${msg.act})`);
     return msg;
@@ -1959,6 +2026,7 @@ export class HiveManager {
     const merged = mergeTaskLedger(current?.tasks, tasks);
     this.writeJson(path, { tasks: merged });
     this.appendLog({ kind: 'tasks', count: merged.length });
+    this.syncRunProjection(merged as HiveTask[]);
     this.commit(`hive: tasks (${merged.length})`);
   }
 
@@ -1969,7 +2037,12 @@ export class HiveManager {
     const ledger = this.tasks() as { tasks?: HiveTask[] };
     const tasks = Array.isArray(ledger?.tasks) ? ledger.tasks : [];
     if (tasks.some((current) => current?.id === task.id)) return false;
-    this.writeTasks([...tasks, task]);
+    const data = this.projection().load();
+    const active = data.lastActiveRunId
+      ? data.runs.find((r) => r.id === data.lastActiveRunId && r.status === 'in_progress')
+      : undefined;
+    const next = active && !task.runId ? { ...task, runId: active.id } : task;
+    this.writeTasks([...tasks, next]);
     return true;
   }
 
