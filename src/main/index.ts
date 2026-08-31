@@ -5,9 +5,9 @@ import {
   unlinkSync, mkdirSync, renameSync, createWriteStream, copyFileSync, lstatSync,
   readlinkSync, symlinkSync
 } from 'node:fs';
-import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
+import { randomBytes, createHash, timingSafeEqual, randomUUID } from 'node:crypto';
 import { join, resolve, sep, basename, dirname, isAbsolute } from 'node:path';
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { request as httpsRequest } from 'node:https';
 import { PtyManager, type SpawnOptions } from './pty';
 import { resolveCommand as resolveCliCommand, isSafeCommandName } from './shellEnv';
@@ -34,9 +34,13 @@ import { MemoryReflector, type ReflectSettings } from './reflect';
 import { PersistStore } from './db';
 import { ProjectRegistry, projectRootOf } from './projectRegistry';
 import { resolveHive, projectIdFromPayload } from './hiveRouter';
+import { listProjectTemplates, saveProjectTemplate, deleteProjectTemplate } from './projectTemplateStore';
+import { SeatBoard } from './seatBoard';
+import { BuiltinAgentHost } from './builtinAgentHost';
 import {
   MAX_ACTIVE_AGENTS,
   DEFAULT_PROJECT_ID,
+  parseAgentPtyId,
   type CreateProjectRole
 } from '../shared/projectTypes';
 import { readAgentUsage, readContextTokens, seedSessionTranscript, resolveSessionCwd } from './transcript';
@@ -380,6 +384,25 @@ const projectRegistry = new ProjectRegistry({
   onProjectRemoved: (projectId) => hookHub.stop(projectId),
   onActiveChanged: bindActiveHive
 });
+const RUNTIME_ID_KV = 'runtimeId';
+function runtimeId(): string {
+  const saved = persist.getKv<string>(RUNTIME_ID_KV);
+  if (typeof saved === 'string' && saved) return saved;
+  const id = randomUUID();
+  persist.setKv(RUNTIME_ID_KV, id);
+  return id;
+}
+const seatBoard = new SeatBoard({
+  getHarnessHome: () => readConfig().harnessHome ?? null,
+  getRuntimeId: runtimeId,
+  hostLabel: () => {
+    try { return hostname(); } catch { return 'local'; }
+  }
+});
+const builtinHost = new BuiltinAgentHost({
+  listHives: () => projectRegistry.listHives(),
+  occupancy: (projectId, agentId) => seatBoard.occupancy(projectId, agentId)
+});
 /** The PRIMARY window — the one running the hive/god orchestration and the sink
  *  for process-global timer events (missions, breaker, Slack ingestion). It is
  *  the most-recently-focused live window, so global events follow the user.
@@ -479,6 +502,12 @@ const preservedWorktrees = new Map<string, PreservedWorktree>();
  * handler or node-pty's onExit).
  */
 function teardownPty(id: string): void {
+  const parsedSeat = parseAgentPtyId(id);
+  const vacateAgent = parsedSeat?.agentId ?? ptyToAgent.get(id);
+  const vacateProject = parsedSeat?.projectId ?? projectRegistry.getActiveProjectId();
+  if (vacateAgent && vacateProject) {
+    try { seatBoard.vacate(vacateProject, vacateAgent); } catch { /* best-effort */ }
+  }
   // Ephemeral-worker flag, read BEFORE the cleanup below deletes the entry. All
   // worker deaths (done-release, idle/token reap, manual stop, crash) funnel
   // through here, so this is the one place their floor card gets archived
@@ -2585,7 +2614,7 @@ ipcMain.handle('pty:spawn', async (evt, opts: AgentSpawnOptions) => {
  *  it can ALSO be invoked by the god-triggered ephemeral-worker watcher (which has
  *  no renderer `evt`). `owner` is the window that should receive this PTY's output
  *  (null → the primary window). Behavior-identical to the prior inline handler. */
-async function spawnAgentCore(opts: AgentSpawnOptions, owner: Electron.WebContents | null): Promise<{ ok: boolean; error?: string; cwd?: string; worktreePath?: string; resumeNotFound?: boolean; resumed?: boolean; seedPrompt?: string }> {
+async function spawnAgentCore(opts: AgentSpawnOptions, owner: Electron.WebContents | null): Promise<{ ok: boolean; error?: string; cwd?: string; worktreePath?: string; resumeNotFound?: boolean; resumed?: boolean; seedPrompt?: string; builtin?: boolean; code?: string }> {
   // ── cwd INGESTION — expand `~` exactly once, here ───────────────────────────
   // This is the single door every agent spawn comes through (`pty:spawn` IPC and
   // the god-triggered ephemeral-worker watcher), so it is where a user-typed
@@ -2600,17 +2629,31 @@ async function spawnAgentCore(opts: AgentSpawnOptions, owner: Electron.WebConten
     || projectIdFromPayload(opts)
     || projectRegistry.getActiveProjectId()
     || DEFAULT_PROJECT_ID;
-  if (ptyManager.getActivePtyCount() >= MAX_ACTIVE_AGENTS) {
-    return { ok: false, error: 'SPAWN_LIMIT_REACHED', code: 'SPAWN_LIMIT_REACHED' } as { ok: boolean; error?: string };
-  }
-  // Which CLI is this? Explicit wins; else inferred from the binary
-  // (claude/codex/grok/agy). Non-Claude providers skip every Claude-only spawn step
-  // below. Persist the resolved provider onto opts (+ hive meta) so the registry
-  // record and downstream provider-aware steps agree on one value.
   const provider = inferAgentProvider(opts.command, opts.provider ?? opts.hive?.provider);
   const claudeProvider = isClaudeProvider(provider);
   opts.provider = provider;
   if (opts.hive) opts.hive = { ...opts.hive, provider };
+  const seatAgentId = opts.hive?.id || parseAgentPtyId(opts.id)?.agentId;
+  if (seatAgentId && opts.projectId && seatBoard.occupancy(opts.projectId, seatAgentId) === 'remote') {
+    return { ok: false, error: 'this seat is claimed on another machine', code: 'SEAT_TAKEN' } as { ok: boolean; error?: string };
+  }
+  if (provider === 'builtin') {
+    if (!opts.noAutoInstall) analytics.track('agent_spawn_attempted', { provider });
+    const h = resolveHive(projectRegistry, hive, opts.projectId);
+    if (opts.hive) await h.ensureAgent({ ...opts.hive, provider: 'builtin' });
+    if (seatAgentId && opts.projectId) {
+      const claimed = seatBoard.claim(opts.projectId, seatAgentId, { provider: 'builtin' });
+      if (!claimed.ok) {
+        return { ok: false, error: claimed.error, code: claimed.code } as { ok: boolean; error?: string };
+      }
+    }
+    void builtinHost.tick();
+    analytics.track('agent_spawned', { provider });
+    return { ok: true, cwd: opts.cwd, builtin: true };
+  }
+  if (ptyManager.getActivePtyCount() >= MAX_ACTIVE_AGENTS) {
+    return { ok: false, error: 'SPAWN_LIMIT_REACHED', code: 'SPAWN_LIMIT_REACHED' } as { ok: boolean; error?: string };
+  }
   // Activation-funnel entry (v0.4.6): every spawn REQUEST, so (attempted − spawned)
   // measures the fallout the whole rebuild exists to see. Gated on !noAutoInstall so
   // the missing-CLI relaunch (the only re-entry, index.ts install-exit handler) does
@@ -2992,6 +3035,9 @@ async function spawnAgentCore(opts: AgentSpawnOptions, owner: Electron.WebConten
   const res = ptyManager.spawn(opts, owner);
   if (res.ok) analytics.track('agent_spawned', { provider });
   else analytics.track('agent_spawn_failed', { provider, reason: spawnFailReason(res.error) });
+  if (res.ok && seatAgentId && opts.projectId) {
+    try { seatBoard.claim(opts.projectId, seatAgentId, { provider }); } catch { /* best-effort */ }
+  }
   syncKeepAwake(); // arm the power-save blocker while ≥1 agent PTY is alive (#18)
   // Hand the resolved worktree path back to the renderer so it can persist it on
   // the agent (only set when isolation actually provisioned a worktree above).
@@ -3496,6 +3542,131 @@ ipcMain.handle('project:delete', (_evt, projectId: unknown) => {
   return res;
 });
 
+ipcMain.handle('project:promote', (_evt, payload: unknown) => {
+  const body = payload && typeof payload === 'object' ? payload as { projectId?: unknown; agentId?: unknown } : {};
+  const projectId = typeof body.projectId === 'string' && body.projectId
+    ? body.projectId
+    : projectRegistry.getActiveProjectId();
+  if (!projectId || typeof body.agentId !== 'string' || !body.agentId) {
+    return { ok: false, code: 'PROJECT_NOT_FOUND', error: 'projectId and agentId required' };
+  }
+  const res = projectRegistry.promote(projectId, body.agentId);
+  if (res.ok) return { ...res, roster: roster.read() };
+  return res;
+});
+ipcMain.handle('project:spinOut', async (_evt, payload: unknown) => {
+  const body = payload && typeof payload === 'object' ? payload as {
+    sourceProjectId?: unknown; agentId?: unknown; name?: unknown;
+  } : {};
+  const sourceProjectId = typeof body.sourceProjectId === 'string' && body.sourceProjectId
+    ? body.sourceProjectId
+    : projectRegistry.getActiveProjectId();
+  if (!sourceProjectId || typeof body.agentId !== 'string' || !body.agentId) {
+    return { ok: false, code: 'PROJECT_NOT_FOUND', error: 'sourceProjectId and agentId required' };
+  }
+  const res = await projectRegistry.spinOut({
+    sourceProjectId,
+    agentId: body.agentId,
+    name: typeof body.name === 'string' ? body.name : undefined
+  });
+  if (res.ok) {
+    try { bootstrapHiveServices(); } catch (e) { console.error('[project] bootstrap after spin-out:', e); }
+    return { ...res, projects: projectRegistry.listProjects() };
+  }
+  return res;
+});
+ipcMain.handle('project:listTemplates', () =>
+  listProjectTemplates(readConfig().harnessHome ?? null));
+ipcMain.handle('project:saveTemplate', (_evt, payload: unknown) => {
+  const home = readConfig().harnessHome;
+  if (!home) return { ok: false, error: 'no harnessHome' };
+  const body = payload && typeof payload === 'object' ? payload as { name?: unknown; roles?: unknown; blurb?: unknown } : {};
+  if (typeof body.name !== 'string' || !Array.isArray(body.roles)) {
+    return { ok: false, error: 'name and roles required' };
+  }
+  return saveProjectTemplate(home, {
+    name: body.name,
+    roles: body.roles as CreateProjectRole[],
+    blurb: typeof body.blurb === 'string' ? body.blurb : undefined
+  });
+});
+ipcMain.handle('project:deleteTemplate', (_evt, id: unknown) => {
+  const home = readConfig().harnessHome;
+  if (!home) return { ok: false, error: 'no harnessHome' };
+  if (typeof id !== 'string' || !id) return { ok: false, error: 'id required' };
+  return deleteProjectTemplate(home, id);
+});
+ipcMain.handle('seat:list', (_evt, projectId: unknown) => {
+  const id = typeof projectId === 'string' && projectId
+    ? projectId
+    : projectRegistry.getActiveProjectId();
+  if (!id) return [];
+  return seatBoard.list(id);
+});
+ipcMain.handle('seat:claim', (_evt, payload: unknown) => {
+  const body = payload && typeof payload === 'object' ? payload as {
+    projectId?: unknown; agentId?: unknown; force?: unknown; provider?: unknown;
+  } : {};
+  const projectId = typeof body.projectId === 'string' && body.projectId
+    ? body.projectId
+    : projectRegistry.getActiveProjectId();
+  if (!projectId || typeof body.agentId !== 'string') {
+    return { ok: false, code: 'PROJECT_NOT_FOUND', error: 'projectId and agentId required' };
+  }
+  return seatBoard.claim(projectId, body.agentId, {
+    force: body.force === true,
+    provider: typeof body.provider === 'string' ? body.provider : undefined
+  });
+});
+ipcMain.handle('seat:vacate', (_evt, payload: unknown) => {
+  const body = payload && typeof payload === 'object' ? payload as {
+    projectId?: unknown; agentId?: unknown; force?: unknown;
+  } : {};
+  const projectId = typeof body.projectId === 'string' && body.projectId
+    ? body.projectId
+    : projectRegistry.getActiveProjectId();
+  if (!projectId || typeof body.agentId !== 'string') {
+    return { ok: false, code: 'PROJECT_NOT_FOUND', error: 'projectId and agentId required' };
+  }
+  return seatBoard.vacate(projectId, body.agentId, { force: body.force === true });
+});
+ipcMain.handle('seat:exportHandoff', (_evt, payload: unknown) => {
+  const body = payload && typeof payload === 'object' ? payload as {
+    projectId?: unknown; agentId?: unknown;
+  } : {};
+  const projectId = typeof body.projectId === 'string' && body.projectId
+    ? body.projectId
+    : projectRegistry.getActiveProjectId();
+  if (!projectId || typeof body.agentId !== 'string') {
+    return { ok: false, error: 'projectId and agentId required' };
+  }
+  const h = hiveIPC(projectId);
+  let identity = '';
+  try {
+    const root = h.root();
+    if (root) {
+      const p = join(root, 'agents', body.agentId, 'identity.md');
+      if (existsSync(p)) identity = readFileSync(p, 'utf8');
+    }
+  } catch { /* best-effort */ }
+  const meta = h.registry().agents[body.agentId];
+  const project = projectRegistry.getMeta(projectId);
+  return {
+    ok: true,
+    handoff: seatBoard.exportHandoff({
+      projectId,
+      projectName: project?.name,
+      agentId: body.agentId,
+      agentName: meta?.name,
+      role: meta?.role,
+      provider: meta?.provider,
+      identity,
+      memory: h.memory(body.agentId),
+      hiveRootPath: project?.hiveRootPath
+    })
+  };
+});
+
 // ─── IPC: hive (multi-agent coordination) ───────────────────────────────────
 function hiveIPC(projectId?: unknown): HiveManager {
   return resolveHive(projectRegistry, hive, projectId);
@@ -3528,9 +3699,10 @@ ipcMain.handle('hive:messages', (_evt, opts: unknown) =>
   hive.voiceMessages(opts && typeof opts === 'object' ? (opts as Parameters<typeof hive.voiceMessages>[0]) : {})
 );
 ipcMain.handle('hive:send', (_evt, partial: Partial<HiveMessage>, from: unknown) => {
-  if (!hive.enabled()) return { ok: false, error: 'hive disabled (no harnessHome)' };
+  const h = hiveIPC();
+  if (!h.enabled()) return { ok: false, error: 'hive disabled (no harnessHome)' };
   const sender = typeof from === 'string' ? from : 'system';
-  const msg = hive.send(partial ?? {}, sender);
+  const msg = h.send(partial ?? {}, sender);
   // Count only what a PERSON sent. Every renderer surface that dispatches on a
   // human's behalf passes 'human' (Command Center dispatch, thread replies, ASK
   // ME answers); agent-to-agent traffic passes the agent id and would swamp the
@@ -5117,6 +5289,7 @@ function bootstrapHiveServices(): void {
   memory.start();
   reflector.start();
   armAlwaysOnBeats();
+  builtinHost.start();
   hiveServicesStarted = true;
 }
 

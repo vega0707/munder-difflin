@@ -17,9 +17,13 @@ import {
   type ProjectErrorCode,
   type CreateProjectRole,
   type OfficeCharacterName,
-  type ProjectRow
+  type ProjectRow,
+  isOfficeCharacter
 } from '../shared/projectTypes';
 import { seedProjectCast } from './seedProjectCast';
+import { RosterStore } from './roster';
+import { stampFloorFrom, type FloorAddress } from '../shared/floorAddress';
+import type { HiveMessage } from './hive';
 
 export function projectRootOf(harnessHome: string, projectId: string): string {
   return join(harnessHome, 'projects', projectId);
@@ -131,6 +135,8 @@ export class ProjectRegistry {
     name: string;
     defaultCwd?: string;
     roles: CreateProjectRole[];
+    /** Default true — spin-out stays on the source floor. */
+    activate?: boolean;
   }): Promise<ProjectMutationResult> {
     const home = this.opts.getHarnessHome();
     if (!home) return { ok: false, code: 'CREATE_FAILED', error: 'no harnessHome' };
@@ -181,8 +187,10 @@ export class ProjectRegistry {
       });
       this.hives.set(projectId, hive);
       this.metas.set(projectId, meta);
+      this.bindHive(hive);
       this.opts.onProjectReady?.(hive);
       this.opts.emit?.('project:changed', { projectId, action: 'create' });
+      if (input.activate === false) return { ok: true, project: meta };
       const switched = this.activate(projectId);
       if (!switched.ok) return switched;
       return { ok: true, project: meta };
@@ -335,7 +343,95 @@ export class ProjectRegistry {
     const hive = new HiveManager(() => projectRoot, this.opts.emit, row.projectId);
     this.hives.set(row.projectId, hive);
     this.metas.set(row.projectId, meta);
+    this.bindHive(hive);
     this.opts.onProjectReady?.(hive);
+  }
+
+  private bindHive(hive: HiveManager): void {
+    hive.setCrossFloorRouter((msg, addr) => this.deliverCrossFloor(hive.projectId, msg, addr));
+  }
+
+  /**
+   * Drop mail into another project's inbox. Never resumes the target PTY —
+   * a paused floor (or a remote seat) reads it from disk later.
+   */
+  deliverCrossFloor(fromProjectId: string, msg: HiveMessage, addr: FloorAddress): boolean {
+    const targetHive = this.hives.get(addr.projectId);
+    if (!targetHive) return false;
+    const inbound: HiveMessage = {
+      ...msg,
+      from: stampFloorFrom(fromProjectId, msg.from),
+      to: addr.agentId
+    };
+    return targetHive.acceptInbound(inbound);
+  }
+
+  promote(projectId: string, agentId: string): ProjectMutationResult & { godId?: string; previousGodId?: string | null } {
+    const hive = this.hives.get(projectId);
+    const meta = this.metas.get(projectId);
+    if (!hive || !meta) return { ok: false, code: 'PROJECT_NOT_FOUND', error: 'project not found' };
+    const promoted = hive.promoteGod(agentId);
+    if (!promoted.ok) {
+      const code = promoted.error.includes('assistant') ? 'NOT_GOD_ELIGIBLE' : 'NOT_GOD_ELIGIBLE';
+      return { ok: false, code, error: promoted.error };
+    }
+    const home = this.opts.getHarnessHome();
+    const projectRoot = home ? projectRootOf(home, projectId) : undefined;
+    let godCharacter = meta.godCharacter;
+    if (projectRoot) {
+      const roster = new RosterStore(() => projectRoot);
+      const snap = roster.read();
+      if (snap && Array.isArray(snap.agents)) {
+        const agents = snap.agents.map((raw) => {
+          const a = raw as { id?: string; isGod?: boolean; character?: unknown };
+          if (typeof a.id !== 'string') return raw;
+          return { ...a, isGod: a.id === agentId };
+        });
+        const godRow = agents.find((raw) => (raw as { id?: string }).id === agentId) as { character?: unknown } | undefined;
+        if (godRow && isOfficeCharacter(godRow.character)) godCharacter = godRow.character;
+        roster.write({ ...snap, agents, selectedId: snap.selectedId });
+      }
+    }
+    const nextMeta = { ...meta, godCharacter };
+    this.metas.set(projectId, nextMeta);
+    this.opts.persist.updateProject(projectId, { godCharacter });
+    this.opts.emit?.('project:changed', { projectId, action: 'promote', godId: agentId });
+    return { ok: true, project: nextMeta, godId: agentId, previousGodId: promoted.previousGodId };
+  }
+
+  async spinOut(input: {
+    sourceProjectId: string;
+    agentId: string;
+    name?: string;
+  }): Promise<ProjectMutationResult> {
+    const source = this.hives.get(input.sourceProjectId);
+    const sourceMeta = this.metas.get(input.sourceProjectId);
+    if (!source || !sourceMeta) {
+      return { ok: false, code: 'PROJECT_NOT_FOUND', error: 'source project not found' };
+    }
+    const home = this.opts.getHarnessHome();
+    if (!home) return { ok: false, code: 'CREATE_FAILED', error: 'no harnessHome' };
+    const projectRoot = projectRootOf(home, input.sourceProjectId);
+    const roster = new RosterStore(() => projectRoot);
+    const snap = roster.read();
+    const row = Array.isArray(snap?.agents)
+      ? snap.agents.find((raw) => (raw as { id?: string }).id === input.agentId) as {
+          id?: string; name?: string; character?: unknown; isGod?: boolean; isAssistant?: boolean;
+        } | undefined
+      : undefined;
+    if (!row || !isOfficeCharacter(row.character)) {
+      return { ok: false, code: 'NOT_GOD_ELIGIBLE', error: 'that seat has no office character to spin out' };
+    }
+    if (row.isAssistant) {
+      return { ok: false, code: 'NOT_GOD_ELIGIBLE', error: 'the send-only assistant cannot open a floor' };
+    }
+    const name = input.name?.trim() || `${row.name || row.character}'s floor`;
+    return this.createProject({
+      name,
+      defaultCwd: sourceMeta.defaultCwd,
+      roles: [{ character: row.character, asGod: true }],
+      activate: false
+    });
   }
 }
 

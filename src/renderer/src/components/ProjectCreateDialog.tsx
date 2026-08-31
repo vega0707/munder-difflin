@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { PixelPanel } from './PixelPanel';
 import { PixelButton } from './PixelButton';
 import { SpritePortrait } from './SpritePortrait';
@@ -10,6 +10,12 @@ import {
   type CreateProjectRole,
   type OfficeCharacterName
 } from '@shared/projectTypes';
+import {
+  BUILTIN_PROJECT_TEMPLATES,
+  CUSTOM_TEMPLATE_ID,
+  rolesFromTemplate,
+  type ProjectTemplate
+} from '@shared/projectTemplates';
 import { useStore } from '@/store/store';
 
 export interface ProjectCreateDialogProps {
@@ -35,9 +41,26 @@ export function ProjectCreateDialog({ onClose, onCreated }: ProjectCreateDialogP
   const [roles, setRoles] = useState<CreateProjectRole[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const [templates, setTemplates] = useState<ProjectTemplate[]>(BUILTIN_PROJECT_TEMPLATES);
+  const [templateId, setTemplateId] = useState(CUSTOM_TEMPLATE_ID);
+  const [saveName, setSaveName] = useState('');
+
+  useEffect(() => {
+    void window.cth.projectListTemplates?.().then((list) => {
+      setTemplates(list as ProjectTemplate[]);
+    }).catch(() => setTemplates([]));
+  }, []);
 
   const ready = name.trim().length > 0 && canSubmitCreateProject(roles);
   const god = roles.find((r) => r.asGod);
+
+  const applyTemplate = (id: string) => {
+    setTemplateId(id);
+    const t = templates.find((x) => x.id === id);
+    if (!t) return;
+    setRoles(rolesFromTemplate(t));
+    setError(undefined);
+  };
 
   const pick = (character: OfficeCharacterName) => {
     setRoles((prev) => toggleCreateRole(prev, character));
@@ -95,6 +118,39 @@ export function ProjectCreateDialog({ onClose, onCreated }: ProjectCreateDialogP
               as the <strong>god</strong> — that person runs the floor. Extra
               characters join as workers.
             </p>
+
+            {templates.length > 0 && (
+              <div>
+                <div style={{ fontSize: 12, marginBottom: 6 }}>Floor template</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {templates.map((t) => {
+                    const active = templateId === t.id;
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        title={t.blurb}
+                        onClick={() => applyTemplate(t.id)}
+                        style={{
+                          border: 'none',
+                          cursor: 'pointer',
+                          padding: '4px 8px',
+                          fontSize: 12,
+                          fontFamily: 'var(--cth-font-ui)',
+                          color: 'var(--cth-ink-900)',
+                          background: active ? 'var(--cth-lemon-light)' : 'var(--cth-cream-100)',
+                          boxShadow: active
+                            ? 'inset 0 0 0 1.5px var(--cth-ink-900)'
+                            : 'inset 0 0 0 1px var(--cth-ink-200)'
+                        }}
+                      >
+                        {t.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
               Project name
@@ -176,6 +232,33 @@ export function ProjectCreateDialog({ onClose, onCreated }: ProjectCreateDialogP
             {error && (
               <p style={{ margin: 0, fontSize: 12, color: 'var(--cth-coral-700)' }}>{error}</p>
             )}
+
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input
+                value={saveName}
+                onChange={(e) => setSaveName(e.target.value)}
+                placeholder="Save these roles as a template…"
+                style={{ ...inputStyle, flex: 1 }}
+                disabled={!canSubmitCreateProject(roles)}
+              />
+              <PixelButton
+                size="sm"
+                disabled={!saveName.trim() || !canSubmitCreateProject(roles) || busy}
+                onClick={() => {
+                  void (async () => {
+                    const res = await window.cth.projectSaveTemplate({
+                      name: saveName.trim(),
+                      roles
+                    });
+                    if (!res.ok) { setError(res.error); return; }
+                    setTemplates((prev) => [...prev, res.template as ProjectTemplate]);
+                    setSaveName('');
+                  })();
+                }}
+              >
+                Save template
+              </PixelButton>
+            </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <PixelButton onClick={onClose} disabled={busy}>Cancel</PixelButton>

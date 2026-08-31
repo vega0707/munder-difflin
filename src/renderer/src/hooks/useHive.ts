@@ -16,7 +16,7 @@ import {
 } from '../../../shared/providerAutomation';
 import { DEFAULT_CONTEXT_TRIGGER, type ContextRule } from '../../../shared/triggers';
 import type { AgentProvider } from '../../../shared/agentProvider';
-import { bridgeOf, providerPreset } from '../../../shared/agentProvider';
+import { bridgeOf, providerPreset, providerNeedsPty } from '../../../shared/agentProvider';
 import { isDurableRole, preferredAgentRole, roleForHiveSpawn } from '../../../shared/agentRole';
 import { inboxNudgeText } from '../../../shared/hiveNudge';
 import { resolveGodName } from '../../../shared/godIdentity';
@@ -31,8 +31,13 @@ const GOD_ID = 'god';
  *  AddAgentModal palette. */
 const SPAWN_ACCENTS = ['coral', 'mint', 'sky', 'lemon', 'lilac', 'peach'] as const;
 
-function godPtyIdFor(projectId: string): string {
-  return agentPtyId(projectId, GOD_ID);
+function godPtyIdFor(projectId: string, godId = GOD_ID): string {
+  return agentPtyId(projectId, godId);
+}
+
+function currentGodId(reg?: { godId?: string | null } | null): string {
+  if (reg?.godId) return reg.godId;
+  return useStore.getState().agents.find((a) => a.isGod)?.id ?? GOD_ID;
 }
 
 const REMOTE_CONTROL_SETTLE_MS = 1500;
@@ -408,27 +413,31 @@ export function useHive(config: HarnessConfig | null): void {
     let cancelled = false;
     godSpawning.current = false;
     useStore.getState().setGodStatus('booting');
-    const godPty = godPtyIdFor(activeProjectId);
     const godCwd = project.defaultCwd?.trim() || project.hiveRootPath.replace(/[/\\]hive[/\\]?$/, '') || config.harnessHome;
     const godCharacter = (project.godCharacter || 'michael') as OfficeCharacterName;
     const t = setTimeout(async () => {
       if (cancelled) return;
       const live = await window.cth.listPtys().catch(() => []);
-      if (live.some((p) => p.id === godPty || (p.projectId === activeProjectId && p.id.endsWith('god')))) {
+      const reg = await window.cth.hiveRegistry(activeProjectId).catch(() => null);
+      const godId = currentGodId(reg);
+      const godPty = godPtyIdFor(activeProjectId, godId);
+      if (live.some((p) => p.id === godPty)) {
         if (!cancelled) useStore.getState().setGodStatus('ready');
         return;
       }
       if (cancelled || godSpawning.current) return;
       godSpawning.current = true;
-      useStore.getState().removeAgent(GOD_ID);
+      useStore.getState().removeAgent(godId);
 
-      const reg = await window.cth.hiveRegistry(activeProjectId).catch(() => null);
-      const godName = resolveGodName(reg?.agents?.[GOD_ID]?.name);
-
-      const godProvider = config.godProvider ?? 'claude';
+      const godName = resolveGodName(reg?.agents?.[godId]?.name);
+      const godProvider = (reg?.agents?.[godId]?.provider as AgentProvider | undefined)
+        ?? config.godProvider
+        ?? 'claude';
       const godModel = config.godModel;
-      const command = buildSpawnCommand(config, godModel, godProvider);
-      const [exe, ...args] = tokenizeCommand(command.trim());
+      const command = providerNeedsPty(godProvider)
+        ? buildSpawnCommand(config, godModel, godProvider)
+        : 'builtin';
+      const [exe, ...args] = tokenizeCommand(command.trim() || 'builtin');
       const res = await window.cth.spawnPty({
         id: godPty,
         cwd: godCwd,
@@ -439,12 +448,12 @@ export function useHive(config: HarnessConfig | null): void {
         rows: 30,
         projectId: activeProjectId,
         resume: true,
-        hive: { id: GOD_ID, name: godName, provider: godProvider, cwd: godCwd, isGod: true, role: 'orchestrator (god)' }
+        hive: { id: godId, name: godName, provider: godProvider, cwd: godCwd, isGod: true, role: 'orchestrator (god)' }
       });
       if (cancelled) { godSpawning.current = false; return; }
       if (!res.ok) { godSpawning.current = false; useStore.getState().setGodStatus('failed'); return; }
       const god: Agent = {
-        id: GOD_ID,
+        id: godId,
         name: godName,
         character: godCharacter,
         accent: 'lemon',
@@ -456,7 +465,7 @@ export function useHive(config: HarnessConfig | null): void {
         action: 'running the floor',
         progress: 0,
         currentStation: 'desk',
-        ptyId: godPty,
+        ptyId: res.builtin ? undefined : godPty,
         command: command.trim(),
         provider: godProvider,
         model: godModel,
@@ -467,9 +476,10 @@ export function useHive(config: HarnessConfig | null): void {
       useStore.getState().setGodStatus('ready');
 
       const resumedGod = res.resumed === true;
-      bootGraceUntil.current[GOD_ID] = Date.now() + BOOT_GRACE_MS;
+      bootGraceUntil.current[godId] = Date.now() + BOOT_GRACE_MS;
       void (async () => {
         try {
+          if (res.builtin || !god.ptyId) return;
           const remoteCommand = remoteControlCommandForProvider(godProvider, godName);
           if (remoteCommand) {
             await submitToPty(godPty, remoteCommand, godProvider, REMOTE_CONTROL_SETTLE_MS);
@@ -479,7 +489,7 @@ export function useHive(config: HarnessConfig | null): void {
             await submitToPty(godPty, resumedGod ? RESUMED_GOD_KICK : initialGodPrompt(godName), godProvider);
           }
         } catch { /* PTY may have died during startup */ }
-        finally { bootGraceUntil.current[GOD_ID] = 0; }
+        finally { bootGraceUntil.current[godId] = 0; }
       })();
     }, 1200);
     return () => { cancelled = true; clearTimeout(t); };
@@ -637,7 +647,7 @@ export function useHive(config: HarnessConfig | null): void {
       }
       seenTerminalHandoffs.current.add(msg.id);
       enqueueMessage(
-        GOD_ID,
+        currentGodId(),
         [
           `Terminal handoff failed for ${msg.to}: ${msg.subject}`,
           '',
@@ -992,7 +1002,7 @@ export function useHive(config: HarnessConfig | null): void {
       // while every Slack-origin god-session runs under the autonomy policy. When
       // main sends no preamble (older build), god just gets the raw text.
       const instruction = msg.autonomyPreamble ? `${msg.autonomyPreamble}${text}` : undefined;
-      useStore.getState().enqueueMessage(GOD_ID, text, { slack, instruction });
+      useStore.getState().enqueueMessage(currentGodId(), text, { slack, instruction });
       // Immediate "queued" acknowledgement in the originating Slack thread.
       void window.cth.slackReply({
         channel: msg.channel,

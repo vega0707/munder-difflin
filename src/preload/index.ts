@@ -579,7 +579,7 @@ const api = {
   // ─── PTY ─────────────────────────────────────────────────────────────────
   /** `cwd` in the result is the TILDE-EXPANDED absolute path main actually spawned
    *  into — the renderer stores that, not the raw `~/…` the user typed. */
-  spawnPty: (opts: SpawnPtyOptions): Promise<{ ok: boolean; error?: string; cwd?: string; worktreePath?: string; resumeNotFound?: boolean; resumed?: boolean; seedPrompt?: string }> =>
+  spawnPty: (opts: SpawnPtyOptions): Promise<{ ok: boolean; error?: string; cwd?: string; worktreePath?: string; resumeNotFound?: boolean; resumed?: boolean; seedPrompt?: string; builtin?: boolean; code?: string }> =>
     ipcRenderer.invoke('pty:spawn', opts),
   writePty: (id: string, data: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('pty:write', id, data),
@@ -781,6 +781,46 @@ const api = {
     ipcRenderer.invoke('project:delete', projectId) as Promise<
       | { ok: true; project: { projectId: string; name: string }; activeProjectId: string | null; roster: RosterSnapshot | null }
       | { ok: false; code: string; error: string }
+    >,
+  projectPromote: (input: { projectId?: string; agentId: string }) =>
+    ipcRenderer.invoke('project:promote', input) as Promise<
+      | { ok: true; project: { projectId: string; name: string; godCharacter: string; hiveRootPath: string; defaultCwd?: string; status: string; createdAt: number }; godId: string; previousGodId?: string | null; roster: RosterSnapshot | null }
+      | { ok: false; code: string; error: string }
+    >,
+  projectSpinOut: (input: { sourceProjectId?: string; agentId: string; name?: string }) =>
+    ipcRenderer.invoke('project:spinOut', input) as Promise<
+      | { ok: true; project: { projectId: string; name: string; godCharacter: string; hiveRootPath: string; defaultCwd?: string; status: string; createdAt: number }; projects: Array<{ projectId: string; name: string; createdAt: number; status: string; defaultCwd?: string; hiveRootPath: string; godCharacter: string }> }
+      | { ok: false; code: string; error: string }
+    >,
+  projectListTemplates: () =>
+    ipcRenderer.invoke('project:listTemplates') as Promise<Array<{
+      id: string; name: string; blurb: string; roles: Array<{ character: string; asGod?: boolean }>; builtin: boolean;
+    }>>,
+  projectSaveTemplate: (input: { name: string; roles: Array<{ character: string; asGod?: boolean }>; blurb?: string }) =>
+    ipcRenderer.invoke('project:saveTemplate', input) as Promise<
+      | { ok: true; template: { id: string; name: string; blurb: string; roles: Array<{ character: string; asGod?: boolean }>; builtin: boolean } }
+      | { ok: false; error: string }
+    >,
+  projectDeleteTemplate: (id: string) =>
+    ipcRenderer.invoke('project:deleteTemplate', id) as Promise<{ ok: true } | { ok: false; error: string }>,
+  seatList: (projectId?: string) =>
+    ipcRenderer.invoke('seat:list', projectId) as Promise<Array<{
+      agentId: string; occupancy: 'local' | 'vacant' | 'remote'; claimedBy?: string; claimedAt?: number; hostLabel?: string; provider?: string;
+    }>>,
+  seatClaim: (input: { projectId?: string; agentId: string; force?: boolean; provider?: string }) =>
+    ipcRenderer.invoke('seat:claim', input) as Promise<
+      | { ok: true; occupancy: 'local' | 'vacant' | 'remote' }
+      | { ok: false; code: string; error: string }
+    >,
+  seatVacate: (input: { projectId?: string; agentId: string; force?: boolean }) =>
+    ipcRenderer.invoke('seat:vacate', input) as Promise<
+      | { ok: true; occupancy: 'local' | 'vacant' | 'remote' }
+      | { ok: false; code: string; error: string }
+    >,
+  seatExportHandoff: (input: { projectId?: string; agentId: string }) =>
+    ipcRenderer.invoke('seat:exportHandoff', input) as Promise<
+      | { ok: true; handoff: Record<string, unknown> }
+      | { ok: false; error: string }
     >,
   onProjectChanged: (cb: (e: { projectId: string; action: string }) => void): (() => void) => {
     const listener = (_e: IpcRendererEvent, payload: { projectId: string; action: string }) => cb(payload);

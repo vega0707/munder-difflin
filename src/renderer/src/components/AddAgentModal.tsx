@@ -232,6 +232,10 @@ export function AddAgentModal({ onClose, config, onConfigChange }: AddAgentModal
       setCommand(command.trim() || config.defaultCommand || '');
       return;
     }
+    if (id === 'builtin') {
+      setCommand('builtin');
+      return;
+    }
     setCommand(buildSpawnCommand(config, nextModel, id));
   };
   const preset = providerPreset(provider);
@@ -395,7 +399,7 @@ export function AddAgentModal({ onClose, config, onConfigChange }: AddAgentModal
     // the offending section as we surface the error — the field is never hidden.
     if (!name.trim()) { setError(tr('addAgent.errName')); setSection('identity'); return; }
     if (!cwd) { setError(tr('addAgent.errFolder')); setSection('workspace'); return; }
-    if (!command.trim()) { setError(tr('addAgent.errCommand')); setSection('engine'); return; }
+    if (provider !== 'builtin' && !command.trim()) { setError(tr('addAgent.errCommand')); setSection('engine'); return; }
 
     setBusy(true);
     const projectId = useStore.getState().activeProjectId ?? 'default';
@@ -467,7 +471,7 @@ export function AddAgentModal({ onClose, config, onConfigChange }: AddAgentModal
       action: resuming && spawnRes.resumeNotFound ? 'session not found — fresh start' : 'starting up',
       progress: 0,
       currentStation: 'desk',
-      ptyId,
+      ptyId: spawnRes.builtin ? undefined : ptyId,
       command: command.trim(),
       provider,
       model,
@@ -889,6 +893,8 @@ export function AddAgentModal({ onClose, config, onConfigChange }: AddAgentModal
                                   ? tr('addAgent.providerAntigravity')
                                   : p.id === 'codex'
                                     ? tr('addAgent.providerCodex')
+                                  : p.id === 'builtin'
+                                    ? 'Office runner — no CLI required. Drains hive mail on this seat.'
                                     : p.id === 'custom'
                                       ? tr('addAgent.providerCustom')
                                       : p.label

@@ -35,6 +35,7 @@ import {
   type AgentProvider
 } from '@/store/config';
 import { canReceiveInbox } from '@shared/agentProvider';
+import { formatFloorAddress } from '@shared/floorAddress';
 import { isComposingKey } from '@shared/imeGuard';
 import { useRtl } from '@/i18n/useDirection';
 
@@ -347,6 +348,8 @@ function FloorTab({ seed }: { seed: { text: string; seq: number } }) {
   const { t } = useTranslation();
   const rtl = useRtl();
   const agents = useStore((s) => s.agents);
+  const projects = useStore((s) => s.projects);
+  const activeProjectId = useStore((s) => s.activeProjectId);
   const godName = agents.find((a) => a.isGod)?.name ?? 'the orchestrator';
   const select = useStore((s) => s.select);
   const updateAgent = useStore((s) => s.updateAgent);
@@ -369,6 +372,7 @@ function FloorTab({ seed }: { seed: { text: string; seq: number } }) {
   // reading "default" was the CLI's, which is a different thing entirely.
   const [defaultModel, setDefaultModel] = useState<string | undefined>(undefined);
   const [dispatchTo, setDispatchTo] = useState<string>(''); // '' = Michael decides
+  const [dispatchFloor, setDispatchFloor] = useState('');
   const [dispatchText, setDispatchText] = useState('');
   const [dispatchMsg, setDispatchMsg] = useState<string | null>(null);
   // ── ISSUES section state ──
@@ -560,15 +564,22 @@ function FloorTab({ seed }: { seed: { text: string; seq: number } }) {
     const full = suggested
       ? `${body}\n\n${t('commandCenter.dispatchSuggestion', { name: suggested.name, id: suggested.id })}`
       : body;
+    const otherFloor = dispatchFloor && dispatchFloor !== activeProjectId;
+    const to = otherFloor ? formatFloorAddress(dispatchFloor, 'god') : 'god';
+    const floorName = otherFloor
+      ? (projects.find((p) => p.projectId === dispatchFloor)?.name ?? dispatchFloor)
+      : undefined;
     const res = await window.cth.hiveSend(
-      { to: 'god', act: 'request', subject: t('commandCenter.taskFromHuman'), body: full },
+      { to, act: 'request', subject: t('commandCenter.taskFromHuman'), body: full },
       'human'
     );
     setDispatchText('');
     setDispatchMsg(res.ok
-      ? suggested
-        ? t('commandCenter.sentToWithSuggestion', { godName, name: suggested.name })
-        : t('commandCenter.sentToMichael', { godName })
+      ? floorName
+        ? t('commandCenter.sentToFloor', { floor: floorName })
+        : suggested
+          ? t('commandCenter.sentToWithSuggestion', { godName, name: suggested.name })
+          : t('commandCenter.sentToMichael', { godName })
       : t('commandCenter.dispatchFailed', { error: res.error ?? '?' }));
     setTimeout(() => setDispatchMsg(null), 4000);
   };
@@ -651,6 +662,19 @@ function FloorTab({ seed }: { seed: { text: string; seq: number } }) {
             ))}
           </Select>
         </div>
+        {projects.length > 1 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+            <span style={{ fontFamily: 'var(--cth-font-display)', fontSize: 8, color: 'var(--cth-ink-500)', flexShrink: 0 }}>
+              {t('commandCenter.dispatchFloor')}
+            </span>
+            <Select value={dispatchFloor} onChange={setDispatchFloor}>
+              <option value="">{t('commandCenter.thisFloor')}</option>
+              {projects.filter((p) => p.projectId !== activeProjectId).map((p) => (
+                <option key={p.projectId} value={p.projectId}>{p.name}</option>
+              ))}
+            </Select>
+          </div>
+        )}
         <textarea
           dir={rtl ? 'auto' : undefined}
           value={dispatchText}

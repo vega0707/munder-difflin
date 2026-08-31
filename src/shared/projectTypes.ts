@@ -42,8 +42,20 @@ export const PROJECT_CHANNELS = {
   DELETE: 'project:delete',
   ACTIVATE: 'project:activate',
   GET_ACTIVE: 'project:getActive',
+  PROMOTE: 'project:promote',
+  SPIN_OUT: 'project:spinOut',
+  LIST_TEMPLATES: 'project:listTemplates',
+  SAVE_TEMPLATE: 'project:saveTemplate',
+  DELETE_TEMPLATE: 'project:deleteTemplate',
   CHANGED: 'project:changed',
   ACTIVE_CHANGED: 'project:active-changed'
+} as const;
+
+export const SEAT_CHANNELS = {
+  LIST: 'seat:list',
+  CLAIM: 'seat:claim',
+  VACATE: 'seat:vacate',
+  EXPORT: 'seat:exportHandoff'
 } as const;
 
 export type ProjectErrorCode =
@@ -54,7 +66,11 @@ export type ProjectErrorCode =
   | 'LAST_PROJECT'
   | 'CREATE_FAILED'
   | 'GOD_REQUIRED'
-  | 'TOO_MANY_GODS';
+  | 'TOO_MANY_GODS'
+  | 'NOT_GOD_ELIGIBLE'
+  | 'ALREADY_GOD'
+  | 'SEAT_TAKEN'
+  | 'SEAT_NOT_HELD';
 
 /** Floor-cast ids. Kept here so main-process create validation does not import Pixi. */
 export const OFFICE_CHARACTER_NAMES = [

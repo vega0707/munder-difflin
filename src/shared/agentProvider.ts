@@ -34,6 +34,7 @@ export type AgentProvider =
   | 'pi'
   | 'copilot'
   | 'cursor'
+  | 'builtin'
   | 'custom';
 
 /** Structured descriptor for how a NON-hiveAware provider gets hive lifecycle
@@ -565,6 +566,20 @@ export const AGENT_PROVIDER_PRESETS: AgentProviderPreset[] = [
     docsUrl: 'https://cursor.com/docs/cli/install'
   },
   {
+    // Product-owned inbox runner. No CLI, no PTY — the main process drains
+    // hive inbox and writes protocol replies so a floor can open without
+    // installing Claude/Codex/Cursor. Not a hosted cloud model.
+    id: 'builtin',
+    label: 'Built-in',
+    defaultCommand: 'builtin',
+    commandGroups: [],
+    autoModeFlag: '',
+    supportsModel: false,
+    autoFlag: '',
+    hiveAware: false,
+    canReceiveInbox: true
+  },
+  {
     id: 'custom',
     label: 'Custom',
     defaultCommand: '',
@@ -591,6 +606,7 @@ export function isAgentProvider(value: unknown): value is AgentProvider {
     value === 'pi' ||
     value === 'copilot' ||
     value === 'cursor' ||
+    value === 'builtin' ||
     value === 'custom'
   );
 }
@@ -645,6 +661,7 @@ export function inferAgentProvider(command: string | undefined, explicit?: unkno
   // Cursor ships as `cursor-agent`; `agent` is a shorter alias (generic name — check last).
   if (bin === 'cursor-agent') return 'cursor';
   if (bin === 'agent') return 'cursor';
+  if (bin === 'builtin') return 'builtin';
   if (bin === 'claude' || !bin) return 'claude';
   return 'custom';
 }
@@ -665,6 +682,11 @@ export function bridgeOf(provider: AgentProvider | undefined): BridgeDescriptor 
 export function defaultCommandForProvider(provider: AgentProvider, fallback = ''): string {
   if (provider === 'custom') return fallback;
   return providerPreset(provider).defaultCommand || fallback;
+}
+
+/** Built-in seats have no child process; skip PTY spawn and the 5-agent cap. */
+export function providerNeedsPty(provider: AgentProvider | undefined): boolean {
+  return (provider ?? 'claude') !== 'builtin';
 }
 
 /** Returns the preset's auto-mode CLI flag for the given provider. Empty string = no flag. */

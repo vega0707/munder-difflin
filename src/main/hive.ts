@@ -43,6 +43,7 @@ import { preferredAgentRole } from '../shared/agentRole';
 import { mergeTaskLedger } from '../shared/taskLedger';
 import { expandTilde } from './fs';
 import { resolveGodName } from '../shared/godIdentity';
+import { parseFloorAddress, type FloorAddress } from '../shared/floorAddress';
 
 /** The subset of HarnessConfig the hive consumes for the default-MCP merge.
  *  Kept as a local shape so hive.ts never imports the foundation-owned config
@@ -58,7 +59,7 @@ export interface HiveMessage {
   conversation: string;
   in_reply_to: string | null;
   from: string;
-  to: string;                 // an agentId, 'god', or 'broadcast'
+  to: string;                 // an agentId, 'god', 'broadcast', or floor:<projectId>/<agentId>
   act: MessageAct;
   subject: string;
   body: string;
@@ -316,6 +317,14 @@ export class HiveManager {
     this.emit = emit
       ? (channel, payload) => emit(channel, withProjectId(payload, projectId))
       : undefined;
+  }
+
+  /** Deliver mail addressed to `floor:<projectId>/<agentId>` into another hive.
+   *  Returns false when the target floor/agent cannot take the file. The
+   *  ProjectRegistry wires this; tests may inject a fake. Never resumes a PTY. */
+  private crossFloor: ((msg: HiveMessage, addr: FloorAddress) => boolean) | null = null;
+  setCrossFloorRouter(fn: ((msg: HiveMessage, addr: FloorAddress) => boolean) | null): void {
+    this.crossFloor = fn;
   }
 
   private routerTimer: NodeJS.Timeout | null = null;
@@ -1515,6 +1524,11 @@ export class HiveManager {
       this.appendLog({ kind: 'drop', reason: 'hop-cap', from: msg.from, to: msg.to, id: msg.id });
       return;
     }
+    const floor = parseFloorAddress(msg.to);
+    if (floor) {
+      this.routeCrossFloor(msg, floor);
+      return;
+    }
     const reg = this.registry();
     const godId = reg.godId ?? 'god';
     // The hive has no separate human-approval queue — approvals are native to
@@ -1598,6 +1612,113 @@ export class HiveManager {
     // Main-process observer (e.g. the closing-time controller watching for the
     // team's ACKs and the god's COMPLETE). Best-effort, never breaks routing.
     try { this.routedObserver?.(msg, targets); } catch { /* observer error */ }
+  }
+
+  private routeCrossFloor(msg: HiveMessage, addr: FloorAddress): void {
+    const delivered = this.crossFloor?.(msg, addr) === true;
+    const target = `floor:${addr.projectId}/${addr.agentId}`;
+    if (!delivered) {
+      this.appendLog({ kind: 'drop', reason: 'no-floor', from: msg.from, to: msg.to, id: msg.id });
+      const godId = this.registry().godId ?? 'god';
+      if (msg.from !== godId) {
+        this.deliver({
+          ...msg,
+          to: godId,
+          subject: `[undeliverable — no floor "${addr.projectId}" / agent "${addr.agentId}"; check project tabs] ${msg.subject}`
+        }, godId);
+      }
+      this.appendLog({ kind: 'message', from: msg.from, to: msg.to, act: msg.act, subject: msg.subject, id: msg.id, delivered: [] });
+      this.emitMessage(msg, []);
+      try { this.routedObserver?.(msg, []); } catch { /* observer error */ }
+      return;
+    }
+    this.appendLog({ kind: 'message', from: msg.from, to: msg.to, act: msg.act, subject: msg.subject, id: msg.id, delivered: [target] });
+    this.emitMessage(msg, [target]);
+    try { this.routedObserver?.(msg, [target]); } catch { /* observer error */ }
+  }
+
+  /**
+   * Accept a message already addressed at this hive (local agent id, or god/human).
+   * Used for cross-floor delivery so the target does not re-parse a floor: to.
+   * Does not resume any PTY — the file just lands in inbox/.
+   */
+  acceptInbound(msg: HiveMessage): boolean {
+    const reg = this.registry();
+    const godId = reg.godId ?? 'god';
+    const toId = (msg.to === 'god' || msg.to === 'human') ? godId : msg.to;
+    if (!this.deliver(msg, toId)) return false;
+    this.appendLog({
+      kind: 'message',
+      from: msg.from,
+      to: msg.to,
+      act: msg.act,
+      subject: msg.subject,
+      id: msg.id,
+      delivered: [toId]
+    });
+    this.emitMessage(msg, [toId]);
+    try { this.routedObserver?.(msg, [toId]); } catch { /* observer error */ }
+    try { this.commit(`hive: inbound ${msg.from}→${toId}`); } catch { /* best-effort */ }
+    return true;
+  }
+
+  /** Move an inbox file into `.done/` after a built-in runner handles it. */
+  archiveInbox(agentId: string, msgId: string): boolean {
+    const src = join(this.agentDir(agentId), 'inbox', `${msgId}.json`);
+    const destDir = join(this.agentDir(agentId), 'inbox', '.done');
+    if (!existsSync(src)) return false;
+    mkdirSync(destDir, { recursive: true });
+    try {
+      renameSync(src, join(destDir, `${msgId}.json`));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Make `agentId` this floor's god. The previous orchestrator stays on the
+   * floor as a worker (same id, including the seeded `god` id). `to: 'god'`
+   * keeps resolving through `godId`.
+   */
+  promoteGod(agentId: string): { ok: true; godId: string; previousGodId: string | null } | { ok: false; error: string } {
+    const root = this.root();
+    if (!root) return { ok: false, error: 'hive disabled' };
+    try {
+      const reg = this.registry();
+      const agent = reg.agents[agentId];
+      if (!agent) return { ok: false, error: 'unknown agent' };
+      if (agent.isAssistant) return { ok: false, error: 'the send-only assistant cannot be god' };
+      const previousGodId = reg.godId;
+      if (reg.godId === agentId && agent.isGod) {
+        return { ok: true, godId: agentId, previousGodId };
+      }
+      for (const row of Object.values(reg.agents)) {
+        const wasGod = row.id === previousGodId || !!row.isGod;
+        row.isGod = row.id === agentId;
+        if (row.id === agentId) {
+          row.role = 'orchestrator (god)';
+        } else if (wasGod && (row.role === 'orchestrator (god)' || row.role === 'orchestrator')) {
+          row.role = 'agent';
+        }
+        row.lastSeen = Date.now();
+      }
+      reg.godId = agentId;
+      this.atomicWriteJson(join(root, 'registry.json'), reg);
+      writeFileSync(join(this.agentDir(agentId), 'identity.md'), this.identityText(reg.agents[agentId]), 'utf8');
+      if (previousGodId && previousGodId !== agentId && reg.agents[previousGodId]) {
+        writeFileSync(
+          join(this.agentDir(previousGodId), 'identity.md'),
+          this.identityText(reg.agents[previousGodId]),
+          'utf8'
+        );
+      }
+      this.appendLog({ kind: 'promote', agentId, previousGodId });
+      this.commit(`hive: promote ${agentId}`);
+      return { ok: true, godId: agentId, previousGodId };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
   }
 
   /** Observer invoked for EVERY routed message with its resolved targets.
@@ -2650,7 +2771,7 @@ Write one JSON file into \`outbox/\` (any filename ending in \`.json\`):
 
 \`\`\`json
 {
-  "to": "<agent-id> | god | broadcast",
+  "to": "<agent-id> | god | broadcast | floor:<projectId>/<agentId>",
   "act": "request | inform | propose | query | agree | refuse | done",
   "subject": "one-line summary",
   "body": "the details",
@@ -2660,6 +2781,19 @@ Write one JSON file into \`outbox/\` (any filename ending in \`.json\`):
 \`\`\`
 
 The harness fills in \`id\`, \`from\`, \`hops\`, and timestamps.
+
+## Cross-floor mail (other projects)
+Each project is its own floor. To reach an agent on another floor:
+
+\`"to": "floor:<projectId>/<agentId>"\`
+
+\`god\` and \`human\` still mean that floor's current orchestrator. The harness
+drops the file in the target inbox and does **not** wake a stopped PTY — a
+paused floor reads the mail when you switch to it, or when another machine
+claims that seat.
+
+The delivered copy's \`from\` is rewritten to \`floor:<yourProjectId>/<your-id>\`
+so a reply can use the same address form.
 
 ## Rules of the road
 - Only \`request\`, \`query\`, and \`propose\` expect a reply. \`inform\` and \`done\` are terminal —

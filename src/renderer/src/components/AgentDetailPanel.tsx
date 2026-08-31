@@ -19,6 +19,7 @@ import { Icon } from './Icon';
 import { AgentNameEditor } from './AgentNameEditor';
 import { useStore, type Agent } from '@/store/store';
 import { usePtyParser } from '@/hooks/usePtyParser';
+import type { OfficeCharacterName } from '@shared/projectTypes';
 
 export interface AgentDetailPanelProps {
   agent: Agent;
@@ -233,6 +234,10 @@ export function AgentDetailPanel({ agent }: AgentDetailPanelProps) {
       {/* #7C — operator control (pause / halt / steer) for live agents */}
       {isReal && <AgentControlStrip agentId={agent.id} />}
 
+      {!agent.isGod && !agent.isAssistant && (
+        <FloorCareerStrip agent={agent} />
+      )}
+
       {/* Tabs */}
       <SidebarTabs current={sidebarTab} accent={agent.accent} onChange={setSidebarTab} />
 
@@ -268,7 +273,9 @@ export function AgentDetailPanel({ agent }: AgentDetailPanelProps) {
             )
           ) : (
             <EmptyTab title={t('agentDetail.noPty')}>
-              {t('agentDetail.noPtyDesc')}
+              {agent.provider === 'builtin'
+                ? t('agentDetail.builtinSeat')
+                : t('agentDetail.noPtyDesc')}
             </EmptyTab>
           )
         )}
@@ -312,3 +319,157 @@ function EmptyTab({ title, children }: { title: string; children: React.ReactNod
     </div>
   );
 }
+
+function FloorCareerStrip({ agent }: { agent: Agent }) {
+  const { t } = useTranslation();
+  const [busy, setBusy] = useState<'promote' | 'spin' | 'claim' | 'vacate' | 'export' | null>(null);
+  const [msg, setMsg] = useState<string | undefined>();
+  const [occupancy, setOccupancy] = useState<'local' | 'vacant' | 'remote' | undefined>();
+  const [hostLabel, setHostLabel] = useState<string | undefined>();
+  const activeProjectId = useStore((s) => s.activeProjectId);
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.cth.seatList?.(activeProjectId ?? undefined).then((rows) => {
+      if (cancelled) return;
+      const row = rows.find((r) => r.agentId === agent.id);
+      setOccupancy(row?.occupancy);
+      setHostLabel(row?.hostLabel);
+    }).catch(() => { /* optional IPC on older builds */ });
+    return () => { cancelled = true; };
+  }, [agent.id, activeProjectId]);
+
+  const flash = (text: string) => {
+    setMsg(text);
+    setTimeout(() => setMsg(undefined), 4000);
+  };
+
+  const promote = async () => {
+    if (busy) return;
+    if (!confirm(t('agentDetail.promoteConfirm', { name: agent.name }))) return;
+    setBusy('promote');
+    try {
+      const res = await window.cth.projectPromote({
+        projectId: activeProjectId ?? undefined,
+        agentId: agent.id
+      });
+      if (!res.ok) { flash(res.error); return; }
+      useStore.getState().setProjectList(
+        useStore.getState().projects.map((p) =>
+          p.projectId === res.project.projectId
+            ? { ...p, godCharacter: res.project.godCharacter as typeof p.godCharacter }
+            : p
+        )
+      );
+      if ('roster' in res && res.roster) useStore.getState().loadFloorFromRoster(res.roster);
+    } finally { setBusy(null); }
+  };
+
+  const spinOut = async () => {
+    if (busy) return;
+    if (!confirm(t('agentDetail.spinOutConfirm', { name: agent.name }))) return;
+    setBusy('spin');
+    try {
+      const res = await window.cth.projectSpinOut({
+        sourceProjectId: activeProjectId ?? undefined,
+        agentId: agent.id,
+        name: `${agent.name}'s floor`
+      });
+      if (!res.ok) { flash(res.error); return; }
+      if ('projects' in res) {
+        useStore.getState().setProjectList(res.projects.map((p) => ({
+          projectId: p.projectId,
+          name: p.name,
+          createdAt: p.createdAt,
+          status: p.status as 'active' | 'degraded' | 'pending-deletion',
+          defaultCwd: p.defaultCwd,
+          hiveRootPath: p.hiveRootPath,
+          godCharacter: p.godCharacter as OfficeCharacterName
+        })));
+      }
+      flash(t('agentDetail.spinOutDone', { name: res.ok ? res.project.name : '' }));
+    } finally { setBusy(null); }
+  };
+
+  const claim = async () => {
+    if (busy) return;
+    setBusy('claim');
+    try {
+      const res = await window.cth.seatClaim({
+        projectId: activeProjectId ?? undefined,
+        agentId: agent.id,
+        force: occupancy === 'remote',
+        provider: agent.provider
+      });
+      if (!res.ok) { flash(res.error); return; }
+      setOccupancy(res.occupancy);
+      flash(t('agentDetail.seatClaimed'));
+    } finally { setBusy(null); }
+  };
+
+  const vacate = async () => {
+    if (busy) return;
+    setBusy('vacate');
+    try {
+      const res = await window.cth.seatVacate({
+        projectId: activeProjectId ?? undefined,
+        agentId: agent.id
+      });
+      if (!res.ok) { flash(res.error); return; }
+      setOccupancy(res.occupancy);
+      flash(t('agentDetail.seatVacated'));
+    } finally { setBusy(null); }
+  };
+
+  const exportHandoff = async () => {
+    if (busy) return;
+    setBusy('export');
+    try {
+      const res = await window.cth.seatExportHandoff({
+        projectId: activeProjectId ?? undefined,
+        agentId: agent.id
+      });
+      if (!res.ok) { flash(res.error); return; }
+      await navigator.clipboard.writeText(JSON.stringify(res.handoff, null, 2));
+      flash(t('agentDetail.handoffCopied'));
+    } finally { setBusy(null); }
+  };
+
+  const seatLabel = occupancy === 'remote'
+    ? t('agentDetail.seatRemote', { host: hostLabel || 'another machine' })
+    : occupancy === 'local'
+      ? t('agentDetail.seatLocal')
+      : t('agentDetail.seatVacant');
+
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 4,
+      padding: '6px 8px',
+      borderBottom: '1px solid var(--cth-ink-200)',
+      background: 'var(--cth-cream-50)',
+      flexShrink: 0
+    }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        <PixelButton size="sm" disabled={!!busy} onClick={() => void promote()}>
+          {t('agentDetail.makeGod')}
+        </PixelButton>
+        <PixelButton size="sm" disabled={!!busy} onClick={() => void spinOut()}>
+          {t('agentDetail.ownFloor')}
+        </PixelButton>
+        <PixelButton size="sm" disabled={!!busy} onClick={() => void claim()}>
+          {t('agentDetail.claimSeat')}
+        </PixelButton>
+        <PixelButton size="sm" disabled={!!busy || occupancy !== 'local'} onClick={() => void vacate()}>
+          {t('agentDetail.vacateSeat')}
+        </PixelButton>
+        <PixelButton size="sm" disabled={!!busy} onClick={() => void exportHandoff()}>
+          {t('agentDetail.exportHandoff')}
+        </PixelButton>
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--cth-ink-500)' }}>
+        {msg ?? seatLabel}
+      </div>
+    </div>
+  );
+}
+
