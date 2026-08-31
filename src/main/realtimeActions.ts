@@ -67,6 +67,15 @@ export interface RealtimeActionDeps {
   controlSnapshot(agentId: string): { paused?: boolean; halted?: boolean } | null;
   killAgent(agentId: string): { ok: boolean; error?: string };
   spawnAgent(opts: RealtimeSpawnSpec): Promise<{ ok: boolean; error?: string }>;
+  /** Persist a new role into the shared catalog (AI/god hire). Optional. */
+  saveRoleDraft?(draft: {
+    title: string;
+    description: string;
+    character: string;
+    source?: 'ai-god' | 'ai-ui' | 'user';
+  }): { ok: true; roleId: string } | { ok: false; error: string };
+  /** Find an existing catalog role by title (case-insensitive). */
+  findRoleTitle?(title: string): { id: string; title: string } | null;
   listMissions(): ScheduledMission[];
   saveMissions(missions: ScheduledMission[]): void;
   /** rt-12: register a voice dispatch with the completion watcher so the engine can
@@ -539,11 +548,33 @@ function buildHalt(deps: RealtimeActionDeps, r: ResolvedAgent): () => Promise<st
   };
 }
 
-function buildSpawn(deps: RealtimeActionDeps, spec: RealtimeSpawnSpec, label: string): () => Promise<string> {
+function buildSpawn(
+  deps: RealtimeActionDeps,
+  spec: RealtimeSpawnSpec,
+  label: string,
+  catalogDraft?: { title: string; description: string; character: string } | null
+): () => Promise<string> {
   return async () => {
+    if (catalogDraft && deps.saveRoleDraft) {
+      const existing = deps.findRoleTitle?.(catalogDraft.title);
+      if (!existing) {
+        const saved = deps.saveRoleDraft({
+          title: catalogDraft.title,
+          description: catalogDraft.description,
+          character: catalogDraft.character,
+          source: 'ai-god'
+        });
+        if (!saved.ok) {
+          return `Couldn't save role "${catalogDraft.title}": ${saved.error}. Hire cancelled.`;
+        }
+      }
+    }
     const res = await deps.spawnAgent(spec);
     attribute(deps, 'spawn', spec.id, { provider: spec.provider, role: spec.hive?.role });
-    return res.ok ? `Hired ${label}.` : `Couldn't hire ${label}: ${res.error || 'unknown error'}.`;
+    const catalogNote = catalogDraft ? ' Role saved to the shared catalog.' : '';
+    return res.ok
+      ? `Hired ${label}.${catalogNote}`
+      : `Couldn't hire ${label}: ${res.error || 'unknown error'}.`;
   };
 }
 
@@ -636,7 +667,11 @@ function proposeDestructive(deps: RealtimeActionDeps, verb: string, a: Record<st
   // spawn / hire — expensive; stubbed $ estimate (rt-9 wires the real number).
   if (verb === 'spawn') {
     const provider = (str(a.provider) || 'claude').toLowerCase();
-    const role = str(a.role) || str(a.job);
+    const role = str(a.role) || str(a.job) || str(a.title);
+    const title = str(a.title) || role;
+    const description = str(a.description) || str(a.brief) || title;
+    const character = str(a.character) || 'jim';
+    const persistCatalog = a.persistCatalog !== false && !!title;
     const name = str(a.name) || (role ? role.replace(/\b\w/g, (c) => c.toUpperCase()) : provider) || 'Worker';
     const godCwd = reg.godId ? reg.agents[reg.godId]?.cwd : undefined;
     const cwd =
@@ -644,14 +679,39 @@ function proposeDestructive(deps: RealtimeActionDeps, verb: string, a: Record<st
     if (!cwd) return { ok: false, spoken: 'I need a working directory to hire into — none is configured.' };
     const command = str(a.command) || PROVIDER_COMMAND[provider] || 'claude';
     const id = `${slug(name)}-${shortId()}`;
-    const spec2: RealtimeSpawnSpec = { id, cwd, command, provider, hive: { id, name, provider, role: role || undefined, cwd } };
-    pending = { verb, confirmWord: 'spawn', targetLabel: name, createdAt: Date.now(), commit: buildSpawn(deps, spec2, `${name} on ${provider}`) };
+    const spec2: RealtimeSpawnSpec = {
+      id,
+      cwd,
+      command,
+      provider,
+      hive: { id, name, provider, role: role || undefined, cwd }
+    };
+    const catalogDraft =
+      persistCatalog && title
+        ? { title, description: description || title, character }
+        : null;
+    const existing = title && deps.findRoleTitle ? deps.findRoleTitle(title) : null;
+    pending = {
+      verb,
+      confirmWord: 'spawn',
+      targetLabel: name,
+      createdAt: Date.now(),
+      commit: buildSpawn(
+        deps,
+        spec2,
+        `${name} on ${provider}`,
+        existing ? null : catalogDraft
+      )
+    };
+    const catalogBit = existing
+      ? ` Using existing catalog role "${existing.title}".`
+      : catalogDraft
+        ? ` I'll also save "${catalogDraft.title}" into the shared role catalog.`
+        : '';
     return {
       ok: true,
       needsConfirm: true,
-      // Spawn/hire is gated behind a verbal echo-back confirm. No cost is quoted —
-      // the orchestrator persona does not surface money to the user.
-      spoken: `You want to hire a new ${provider} agent${role ? ` as ${role}` : ''}, named ${name}. To hire, say "confirm" or "spawn". Say "cancel" to stop.`
+      spoken: `You want to hire a new ${provider} agent${role ? ` as ${role}` : ''}, named ${name}.${catalogBit} To hire, say "confirm" or "spawn". Say "cancel" to stop.`
     };
   }
 

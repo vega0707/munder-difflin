@@ -4,7 +4,7 @@ import { PixelButton } from './PixelButton';
 import { PixelBadge } from './PixelBadge';
 import { useStore } from '@/store/store';
 import { MarkdownPreview } from '@/markdown/MarkdownPreview';
-import { type HiveTask, type HumanQA, openQuestion, waitsOnHuman } from './TasksKanban';
+import { type HiveTask, type HumanQA, openQuestion, waitsOnHuman } from './hiveTasks';
 import { compareByNewestAsk } from './askMeOrder';
 import { isComposingKey } from '@shared/imeGuard';
 import { useRtl } from '@/i18n/useDirection';

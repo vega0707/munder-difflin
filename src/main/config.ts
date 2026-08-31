@@ -7,6 +7,7 @@ import {
   defaultCommandForProvider,
   inferAgentProvider,
   providerPreset,
+  resolveAgentProvider,
   type AgentProvider
 } from '../shared/agentProvider';
 import { defaultMcpDefaults } from '../shared/mcpCatalog';
@@ -255,6 +256,9 @@ export interface HarnessConfig {
   /** Max concurrent god-triggered ephemeral Slack workers; extra spawn-requests
    *  wait in the queue (natural backpressure, a resource backstop). Default 4. */
   maxConcurrentWorkers?: number;
+  /** Global live-PTY cap across ALL projects. Extra seats stay on the floor
+   *  without a PTY (划水) until a slot frees. Default MAX_ACTIVE_AGENTS (5). */
+  maxActiveAgents?: number;
   /** Minutes an ephemeral worker may produce NO output before the reaper kills it
    *  — idle-based, never wall-clock, so an actively-working worker is never reaped.
    *  Default 20. */
@@ -345,11 +349,17 @@ export interface HarnessConfig {
    *  the composer shows no mic button, no getUserMedia runs, and no Groq call is
    *  ever made (zero behavior change). */
   freeflowEnabled?: boolean;
-  /** User-pasted Groq API key (the user supplies their own free key). Used ONLY in
-   *  the main process for the Groq STT call; NEVER logged, and never crosses IPC
-   *  for the request. Treated like `slackBotToken`. */
+  /** User-pasted STT API key (Groq `gsk_…` or SiliconFlow `sk-…`). Used ONLY in
+   *  the main process for the transcription call; NEVER logged, and never
+   *  crosses IPC for the request. Treated like `slackBotToken`. */
   groqApiKey?: string;
-  /** Groq Whisper model id. Default 'whisper-large-v3-turbo' (fast, multilingual). */
+  /** STT backend for Free Flow. Default groq (original path). `siliconflow`
+   *  is the China-reachable SenseVoice host; `ctrip` uses CXB_ASR_TOKEN env. */
+  freeflowProvider?: 'groq' | 'siliconflow' | 'ctrip';
+  /** Set once when main autoselects Ctrip on boot (CXB_ASR_TOKEN present). Prevents
+   *  re-flipping after the user manually picks another provider. */
+  freeflowCtripAutoselected?: boolean;
+  /** Groq Whisper / SenseVoice model id. Default follows the selected provider. */
   freeflowModel?: string;
 
   // ─── Realtime Michael (premium speech-to-speech voice orchestrator) ─────────
@@ -415,6 +425,18 @@ export interface HarnessConfig {
   /** Never condense a file smaller than this; also the section-trigger byte floor.
    *  DECIDED: 16 KB. */
   reflectMinBytes?: number;
+
+  // ─── Seat hub (MultiCA-style coordination; local CLIs still execute) ──────
+  /** Remote SeatHub base URL (`http://host:3851`). Empty = this machine's seats.json. */
+  seatHubUrl?: string;
+  /** Shared token for SeatHub. Never logged, never mailed into hive. */
+  seatHubToken?: string;
+  /** Serve a SeatHub on this machine so other runtimes can take over seats. */
+  seatHubListen?: boolean;
+  /** Port when `seatHubListen` is on. Default 3851. */
+  seatHubPort?: number;
+  /** Bind address when serving. Default 127.0.0.1; set 0.0.0.0 for LAN. */
+  seatHubBind?: string;
 }
 
 const DEFAULTS: HarnessConfig = {
@@ -425,8 +447,8 @@ const DEFAULTS: HarnessConfig = {
   autoMode: true,
   orchestratorMaySpawn: false,
   defaultCommand: 'claude',
-  godProvider: 'claude',
-  godModel: 'claude-opus-4-8',
+  godProvider: 'builtin',
+  godModel: undefined,
   // Global default model for every agent that hasn't picked one explicitly — wins
   // over the role-based tiers (modelForRole) in the spawn handler, so all agents
   // (incl. god) default to Fable 5. A per-agent model choice still overrides it.
@@ -435,6 +457,7 @@ const DEFAULTS: HarnessConfig = {
   // (safe-readonly ON, write/secret OFF).
   mcpDefaults: defaultMcpDefaults(),
   maxConcurrentWorkers: 4,
+  maxActiveAgents: 5,
   workerIdleTimeoutMinutes: 20,
   integrations: [],
   defaultWorkerTokenCap: 0, // 0 = unlimited (human directive: NO per-worker cap)
@@ -456,6 +479,7 @@ const DEFAULTS: HarnessConfig = {
   slackProactivePosting: false,
   freeflowEnabled: true,
   groqApiKey: undefined,
+  freeflowProvider: 'groq',
   freeflowModel: 'whisper-large-v3-turbo',
   realtimeVoiceEnabled: false,
   realtimeIdleDisconnectMs: 180_000,
@@ -482,7 +506,12 @@ const DEFAULTS: HarnessConfig = {
   // v0.3.4 fix: default OFF, matching the field's own documentation ("Default
   // OFF / dark until enabled") — the true default contradicted it. Existing
   // installs keep their persisted value.
-  knowledgeGraph: { enabled: false }
+  knowledgeGraph: { enabled: false },
+  seatHubUrl: '',
+  seatHubToken: '',
+  seatHubListen: false,
+  seatHubPort: 3851,
+  seatHubBind: '127.0.0.1'
 };
 
 function configPath(): string {
@@ -751,7 +780,9 @@ export function modelForRole(
   if (meta.isGod) {
     // GOD engine is selectable: an explicit godModel wins, else the chosen
     // provider's recommended orchestrator model, else the legacy Opus default.
-    const preset = providerPreset(config?.godProvider ?? 'claude');
+    const provider = resolveAgentProvider(config?.godProvider);
+    if (provider === 'builtin') return config?.godModel;
+    const preset = providerPreset(provider);
     return config?.godModel ?? preset.recommendedOrchestratorModel ?? MODEL_GOD;
   }
   const hay = `${meta.role ?? ''} ${(meta.capabilities ?? []).join(' ')}`.toLowerCase();

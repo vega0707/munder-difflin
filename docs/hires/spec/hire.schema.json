@@ -90,7 +90,25 @@
       "maxItems": 8,
       "items": {
         "type": "string",
-        "enum": ["md-hive-sync", "md-fetch-summarize", "md-audit"]
+        "enum": [
+          "capabilities",
+          "temporal",
+          "today",
+          "yesterday",
+          "thisWeek",
+          "lastWeek",
+          "thisMonth",
+          "lastMonth",
+          "thisQuarter",
+          "lastQuarter",
+          "thisYear",
+          "lastYear",
+          "last7Days",
+          "last30Days",
+          "md-audit",
+          "md-hive-sync",
+          "md-fetch-summarize"
+        ]
       },
       "description": "Bundled skill ids to activate in the agent's workspace. References into the BUNDLED_SKILL_IDS allowlist only — never raw file paths. Only the built-in safe (read-only, no-secret) skills may be listed."
     },

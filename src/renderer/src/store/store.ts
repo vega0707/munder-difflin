@@ -18,6 +18,7 @@ import { preferredAgentRole } from '@shared/agentRole';
 import { isInboxNudge } from '@shared/hiveNudge';
 import { refocusAfterRemoval, focusOnLoad, restoreFocus } from './focusMode';
 import { chooseRosterSource } from './rosterSource';
+import type { ProjectMeta } from '@shared/projectTypes';
 
 export type ToolKind =
   | 'Read' | 'Edit' | 'Write' | 'Bash' | 'WebFetch' | 'WebSearch'
@@ -182,6 +183,7 @@ interface State {
   selectedId: string | null;
   feeds: Record<string, string[]>;
   addAgentOpen: boolean;
+  rolePickerOpen: boolean;
   fullscreenAgentId: string | null;
   /** Does the user work in focus mode by default? Persisted as a boolean, and
    *  written ONLY by an explicit toggle. Kept in the store rather than read once
@@ -209,6 +211,21 @@ interface State {
   sidebarWidth: number;
   sidebarTab: SidebarTab;
   godStatus: GodStatus;
+  /** Last god spawn failure (SPAWN_LIMIT, missing CLI, …). Cleared on boot/success. */
+  godSpawnError: string | null;
+  projects: ProjectMeta[];
+  activeProjectId: string | null;
+  setProjectList: (list: ProjectMeta[]) => void;
+  setActiveProjectId: (id: string | null) => void;
+  /** Replace the visible floor with another project's roster. Does not flush
+   *  the previous floor — caller must flushRoster() first. */
+  loadFloorFromRoster: (snap: {
+    agents?: unknown[];
+    archived?: unknown[];
+    restorable?: unknown[];
+    queues?: Record<string, unknown[]>;
+    selectedId?: string | null;
+  } | null) => void;
   /** Per-agent outgoing message queue (agent id → messages awaiting delivery).
    *  Lets the user keep "talking" to a busy agent: messages park here and are
    *  drained to the terminal one-by-one once the agent is free. */
@@ -217,7 +234,10 @@ interface State {
    *  shown in the command center (interactive sessions don't expose billed $). */
   toolCounts: Record<string, number>;
   bumpToolCount: (id: string) => void;
-  setGodStatus: (status: GodStatus) => void;
+  setGodStatus: (status: GodStatus, error?: string | null) => void;
+  /** Bump to re-run the god bootstrap effect (retry after failure). */
+  godBootNonce: number;
+  retryGodBoot: () => void;
   select: (id: string) => void;
   updateAgent: (id: string, patch: Partial<Agent>) => void;
   /** Copy durable hive roles onto roster descriptions (and the reverse is a
@@ -270,6 +290,12 @@ interface State {
    *  by Settings on save. */
   hasGroqKey: boolean;
   setHasGroqKey: (has: boolean) => void;
+  /** Mirror of `CXB_ASR_TOKEN` presence (boolean only — the token lives in main's
+   *  env, never the store). Gates the Free Flow mic when ctrip is the STT provider.
+   *  Set by App on load via window.cth.freeflowCtripTokenPresent() and by Settings
+   *  on save. */
+  hasCtripAsrToken: boolean;
+  setHasCtripAsrToken: (has: boolean) => void;
   /** Mirror of BYOK OpenAI key presence (boolean only — the key lives in the main
    *  secret broker, never the store). Gates the Realtime Michael voice toggle the
    *  way hasGroqKey gates the Free Flow mic. Set by App on load via
@@ -309,6 +335,7 @@ interface State {
   /** Clear an agent's entire pending queue. */
   clearQueue: (agentId: string) => void;
   setAddAgentOpen: (open: boolean) => void;
+  setRolePickerOpen: (open: boolean) => void;
   /** Validated manifests waiting for one-at-a-time human review. */
   hireQueue: HireReviewQueue;
   enqueuePendingHires: (manifests: readonly HireManifest[]) => void;
@@ -502,7 +529,7 @@ function loadPersistedAgents(): Agent[] {
       ...a,
       progress: 0,
       status: 'idle',
-      action: 'reconnecting…',
+      action: a.ptyId ? 'reconnecting…' : (a.isGod ? 'running the floor' : 'idle'),
       currentStation: 'desk',
       carrying: undefined,
       recentTextTs: Date.now(),
@@ -679,6 +706,7 @@ export const useStore = create<State>((set, get) => ({
   selectedId: initialSelectedId,
   feeds: {},
   addAgentOpen: false,
+  rolePickerOpen: false,
   ccTabRequest: null,
   requestCommandCenterTab: (tab) =>
     set((s) => ({ ccTabRequest: { tab, seq: (s.ccTabRequest?.seq ?? 0) + 1 } })),
@@ -690,11 +718,56 @@ export const useStore = create<State>((set, get) => ({
   sidebarWidth: initialSidebarWidth,
   sidebarTab: initialSidebarTab,
   godStatus: 'booting',
+  godSpawnError: null,
+  godBootNonce: 0,
+  projects: [],
+  activeProjectId: null,
+  setProjectList: (list) => set({ projects: list }),
+  setActiveProjectId: (id) => set({ activeProjectId: id }),
+  loadFloorFromRoster: (snap) =>
+    set(() => {
+      const agents = agentsFromRoster(snap?.agents);
+      const archivedAgents = archivedFromRoster(snap?.archived);
+      const restorableAgents = restorableFromRoster(snap?.restorable);
+      const messageQueues = queuesFromRoster(snap?.queues);
+      const selectedId = (typeof snap?.selectedId === 'string' && agents.some((a) => a.id === snap.selectedId))
+        ? snap.selectedId
+        : (agents[0]?.id ?? null);
+      rosterMirror.agents = slimAgents(agents);
+      rosterMirror.archived = slimAgents(archivedAgents);
+      rosterMirror.restorable = slimAgents(restorableAgents);
+      rosterMirror.queues = messageQueues;
+      rosterMirror.selectedId = selectedId;
+      try {
+        window.localStorage.setItem(LS_AGENTS, JSON.stringify(rosterMirror.agents));
+        window.localStorage.setItem(LS_ARCHIVED, JSON.stringify(rosterMirror.archived));
+        window.localStorage.setItem(LS_RESTORABLE, JSON.stringify(rosterMirror.restorable));
+        window.localStorage.setItem(LS_QUEUES, JSON.stringify(messageQueues));
+        window.localStorage.setItem(LS_SELECTED, selectedId ?? '');
+      } catch { /* noop */ }
+      return {
+        agents,
+        archivedAgents,
+        restorableAgents,
+        messageQueues,
+        selectedId,
+        feeds: {},
+        godStatus: agents.some((a) => a.isGod) ? 'ready' : 'booting'
+      };
+    }),
   messageQueues: initialQueues,
   toolCounts: {},
   bumpToolCount: (id) =>
     set((s) => ({ toolCounts: { ...s.toolCounts, [id]: (s.toolCounts[id] ?? 0) + 1 } })),
-  setGodStatus: (status) => set({ godStatus: status }),
+  setGodStatus: (status, error) => set({
+    godStatus: status,
+    godSpawnError: status === 'failed' ? (error ?? null) : null
+  }),
+  retryGodBoot: () => set((s) => ({
+    godStatus: 'booting',
+    godSpawnError: null,
+    godBootNonce: s.godBootNonce + 1
+  })),
   select: (id) => set((s) => { persistAgents(s.agents, id); return { selectedId: id, ccTabRequest: null }; }),
   updateAgent: (id, patch) =>
     set((s) => {
@@ -878,6 +951,8 @@ export const useStore = create<State>((set, get) => ({
   setFreeflowEnabled: (on) => set({ freeflowEnabled: on }),
   hasGroqKey: false,
   setHasGroqKey: (has) => set({ hasGroqKey: has }),
+  hasCtripAsrToken: false,
+  setHasCtripAsrToken: (has) => set({ hasCtripAsrToken: has }),
   hasOpenAiKey: false,
   setHasOpenAiKey: (has) => set({ hasOpenAiKey: has }),
   officeTheme: 'office',
@@ -964,8 +1039,18 @@ export const useStore = create<State>((set, get) => ({
     set((s) => {
       const live = new Set(livePtyIds);
       // Keep agents with no PTY (synthetic) or whose PTY is still alive.
-      const agents = s.agents.filter((a) => !a.ptyId || live.has(a.ptyId));
-      if (agents.length === s.agents.length) return s;
+      let agents = s.agents.filter((a) => !a.ptyId || live.has(a.ptyId));
+      // Clear the boot/switch placeholder once we know the terminal is live —
+      // otherwise "reconnecting…" sticks until the next hook event (which may
+      // never come if the CLI is idle).
+      agents = agents.map((a) => {
+        if (a.ptyId && live.has(a.ptyId) && /^reconnecting/.test(a.action || '')) {
+          return { ...a, action: a.isGod ? 'running the floor' : 'idle' };
+        }
+        return a;
+      });
+      if (agents.length === s.agents.length
+        && agents.every((a, i) => a === s.agents[i])) return s;
       // Workers whose terminal died with the previous session become restorable
       // (full spawn recipe retained) instead of silently vanishing. God and the
       // prep assistant are excluded — they auto-respawn at boot.
@@ -987,6 +1072,7 @@ export const useStore = create<State>((set, get) => ({
       return { agents, feeds, selectedId, restorableAgents, fullscreenAgentId };
     }),
   setAddAgentOpen: (open) => set({ addAgentOpen: open }),
+  setRolePickerOpen: (open) => set({ rolePickerOpen: open }),
   hireQueue: EMPTY_HIRE_QUEUE,
   enqueuePendingHires: (manifests) => set((s) => ({
     hireQueue: enqueueHires(s.hireQueue, manifests)
@@ -1037,6 +1123,60 @@ export const useStore = create<State>((set, get) => ({
 
 export function selectedAgent(s: State): Agent | undefined {
   return s.agents.find(a => a.id === s.selectedId);
+}
+
+/** Flush the in-memory roster mirror now (project switch, before activate). */
+export function flushRoster(): void {
+  flushRosterNow();
+}
+
+function asAgentList(raw: unknown): Agent[] {
+  return Array.isArray(raw) ? (raw as Agent[]) : [];
+}
+
+function agentsFromRoster(raw: unknown): Agent[] {
+  return asAgentList(raw).map((a) => ({
+    ...a,
+    progress: 0,
+    status: 'idle' as const,
+    // Only seats that had a live terminal expect a reconnect. Roster-only /
+    // 划水 seats never get hook traffic, so "reconnecting…" would stick forever.
+    action: a.ptyId ? 'reconnecting…' : (a.isGod ? 'running the floor' : 'idle'),
+    currentStation: 'desk' as const,
+    carrying: undefined,
+    recentTextTs: Date.now()
+  }));
+}
+
+function archivedFromRoster(raw: unknown): Agent[] {
+  return asAgentList(raw).map((a) => ({
+    ...a,
+    archived: true,
+    status: 'idle' as const,
+    ptyId: undefined,
+    carrying: undefined,
+    currentStation: undefined
+  }));
+}
+
+function restorableFromRoster(raw: unknown): Agent[] {
+  return asAgentList(raw).map((a) => ({
+    ...a,
+    status: 'idle' as const,
+    carrying: undefined,
+    currentStation: undefined
+  }));
+}
+
+function queuesFromRoster(raw: unknown): Record<string, QueuedMessage[]> {
+  if (!raw || typeof raw !== 'object') return {};
+  const out: Record<string, QueuedMessage[]> = {};
+  for (const [id, q] of Object.entries(raw as Record<string, unknown>)) {
+    if (Array.isArray(q)) {
+      out[id] = q.filter((m) => m && typeof (m as QueuedMessage).text === 'string' && typeof (m as QueuedMessage).id === 'string') as QueuedMessage[];
+    }
+  }
+  return out;
 }
 
 /** Whether the Command Center's Trigger History tab has anything to be about

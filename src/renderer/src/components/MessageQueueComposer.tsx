@@ -52,6 +52,7 @@ export function MessageQueueComposer({ agent }: MessageQueueComposerProps) {
   // (hasGroqKey is boolean presence only — the key value never reaches the store).
   const freeflowEnabled = useStore((s) => s.freeflowEnabled);
   const hasGroqKey = useStore((s) => s.hasGroqKey);
+  const hasCtripAsrToken = useStore((s) => s.hasCtripAsrToken);
   const ff = useFreeflow();
   const ffMine = ff.targetAgentId === agent.id;
   const ffHint = !freeflowEnabled
@@ -383,7 +384,7 @@ export function MessageQueueComposer({ agent }: MessageQueueComposerProps) {
               <Icon name="plus" /> {t('queueComposer.files')}
             </span>
           </PixelButton>
-          {freeflowEnabled && <FreeFlowButton agentId={agent.id} hasGroqKey={hasGroqKey} />}
+          {freeflowEnabled && <FreeFlowButton agentId={agent.id} hasGroqKey={hasGroqKey} hasCtripAsrToken={hasCtripAsrToken} />}
           <PixelButton variant="primary" size="sm" onClick={queueIt} disabled={!canSend}>
             <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
               {t('commandBar.send')} <Icon name="arrow-right" />
@@ -553,20 +554,39 @@ function QueuedMessageRow(
  * another agent is mid-dictation it's disabled (one shared recorder). The actual
  * capture + Groq call live in the freeflow recorder singleton.
  *
- * When no Groq key is configured the button stays visible but disabled, with a
+ * When no STT credential is configured the button stays visible but disabled, with a
  * tooltip pointing to Settings — it never starts a recording, so getUserMedia and
- * the Groq STT call are never reached (preserving the zero-call-when-unavailable
- * guarantee). `hasGroqKey` is boolean presence only; the key value never gets here.
+ * the STT call are never reached (preserving the zero-call-when-unavailable
+ * guarantee). Groq/SiliconFlow keys and the ctrip env token are boolean presence
+ * only; the values never get here.
  */
-function FreeFlowButton({ agentId, hasGroqKey }: { agentId: string; hasGroqKey: boolean }) {
+function FreeFlowButton({
+  agentId,
+  hasGroqKey,
+  hasCtripAsrToken
+}: {
+  agentId: string;
+  hasGroqKey: boolean;
+  hasCtripAsrToken: boolean;
+}) {
   const { t } = useTranslation();
   const ff = useFreeflow();
+  const [freeflowProvider, setFreeflowProvider] = useState<'groq' | 'siliconflow' | 'ctrip' | undefined>();
   const mine = ff.targetAgentId === agentId;
   const recording = ff.status === 'recording' && mine;
   const transcribing = ff.status === 'transcribing' && mine;
+  const showLevelMeter = recording && (ff.level > 0 || freeflowProvider === 'ctrip');
+
+  useEffect(() => {
+    let alive = true;
+    window.cth.getConfig().then((c) => {
+      if (alive) setFreeflowProvider(c.freeflowProvider);
+    }).catch(() => { /* keep undefined — meter hides unless level > 0 */ });
+    return () => { alive = false; };
+  }, []);
   // Block while another agent's clip is recording/uploading (single recorder).
   const busyElsewhere = ff.status !== 'idle' && !mine;
-  const noKey = !hasGroqKey;
+  const noKey = freeflowProvider === 'ctrip' ? !hasCtripAsrToken : !hasGroqKey;
 
   const hintRef = useRef<HTMLSpanElement | null>(null);
   const iconRef = useRef<HTMLButtonElement | null>(null);
@@ -631,7 +651,28 @@ function FreeFlowButton({ agentId, hasGroqKey }: { agentId: string; hasGroqKey: 
       {/* Wrap in a (non-disabled) span so the native tooltip still shows on hover
           even when the inner button is disabled — Chromium suppresses tooltips on
           a disabled <button> itself. */}
-      <span title={title} style={{ display: 'inline-flex' }}>
+      <span title={title} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+        {showLevelMeter && (
+          <span
+            aria-hidden
+            style={{
+              width: 40,
+              height: 4,
+              flexShrink: 0,
+              background: 'var(--cth-ink-100)',
+              boxShadow: 'inset 0 0 0 1px var(--cth-ink-300)',
+              overflow: 'hidden'
+            }}
+          >
+            <span style={{
+              display: 'block',
+              height: '100%',
+              width: `${Math.round(ff.level * 100)}%`,
+              background: 'var(--cth-coral)',
+              transition: 'width 50ms linear'
+            }} />
+          </span>
+        )}
         <PixelButton
           variant={recording ? 'destructive' : 'secondary'}
           size="sm"
@@ -697,10 +738,16 @@ function FreeFlowButton({ agentId, hasGroqKey }: { agentId: string; hasGroqKey: 
                 <li>
                   {t('queueComposer.ffCreateKey')}{' '}
                   <a
+                    href="https://cloud.siliconflow.cn/account/ak"
+                    onClick={(e) => { e.preventDefault(); void window.cth.openExternal('https://cloud.siliconflow.cn/account/ak'); }}
+                    style={{ color: 'var(--cth-ink-900)' }}
+                  >cloud.siliconflow.cn</a>
+                  {' / '}
+                  <a
                     href="https://console.groq.com/keys"
                     onClick={(e) => { e.preventDefault(); void window.cth.openExternal('https://console.groq.com/keys'); }}
                     style={{ color: 'var(--cth-ink-900)' }}
-                  >console.groq.com/keys</a>
+                  >console.groq.com</a>
                 </li>
                 <li>{t('queueComposer.ffPasteKey')}</li>
                 <li>{t('queueComposer.ffClickOrHold')}</li>

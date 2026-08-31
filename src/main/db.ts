@@ -18,6 +18,7 @@
 import Database from 'better-sqlite3';
 import { app } from 'electron';
 import { join } from 'node:path';
+import type { ProjectRow, ProjectStatus } from '../shared/projectTypes';
 
 /** A captured user prompt, as returned to the renderer (camelCase columns). */
 export interface CommandHistoryRow {
@@ -64,6 +65,21 @@ const MIGRATIONS: Array<(db: Database.Database) => void> = [
       );
       CREATE INDEX IF NOT EXISTS idx_ch_agent_ts ON command_history(agent_id, ts DESC);
     `);
+  },
+  // → user_version 2: multi-project metadata + optional project_id on history.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS projects (
+        project_id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('active', 'degraded', 'pending-deletion')),
+        default_cwd TEXT,
+        hive_root_path TEXT NOT NULL,
+        god_character TEXT NOT NULL DEFAULT 'michael'
+      );
+    `);
+    db.exec(`ALTER TABLE command_history ADD COLUMN project_id TEXT`);
   }
 ];
 
@@ -164,6 +180,59 @@ export class PersistStore {
     return this.db.prepare(
       "SELECT id, agent_id AS agentId, cwd, text, ts FROM command_history WHERE text LIKE ? ESCAPE '\\' ORDER BY ts DESC, id DESC LIMIT ?"
     ).all(needle, lim) as CommandHistoryRow[];
+  }
+
+  // ─── projects (multi-hive) ─────────────────────────────────────────────────
+
+  /** TODO[REENTRANCY] 幂等: 同 projectId 再 insert 走 PRIMARY KEY 冲突，由调用方决定是否先 get。 */
+  insertProject(row: ProjectRow): void {
+    if (!this.db) return;
+    this.db.prepare(
+      `INSERT INTO projects (project_id, name, created_at, status, default_cwd, hive_root_path, god_character)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(row.projectId, row.name, row.createdAt, row.status, row.defaultCwd, row.hiveRootPath, row.godCharacter);
+  }
+
+  getProject(projectId: string): ProjectRow | undefined {
+    if (!this.db) return undefined;
+    const row = this.db.prepare(
+      `SELECT project_id AS projectId, name, created_at AS createdAt, status,
+              default_cwd AS defaultCwd, hive_root_path AS hiveRootPath,
+              god_character AS godCharacter
+       FROM projects WHERE project_id = ?`
+    ).get(projectId) as ProjectRow | undefined;
+    return row;
+  }
+
+  listProjects(): ProjectRow[] {
+    if (!this.db) return [];
+    return this.db.prepare(
+      `SELECT project_id AS projectId, name, created_at AS createdAt, status,
+              default_cwd AS defaultCwd, hive_root_path AS hiveRootPath,
+              god_character AS godCharacter
+       FROM projects ORDER BY created_at ASC, project_id ASC`
+    ).all() as ProjectRow[];
+  }
+
+  updateProject(projectId: string, patch: Partial<Omit<ProjectRow, 'projectId'>>): void {
+    if (!this.db) return;
+    const current = this.getProject(projectId);
+    if (!current) return;
+    const next: ProjectRow = {
+      ...current,
+      ...patch,
+      projectId,
+      status: (patch.status ?? current.status) as ProjectStatus
+    };
+    this.db.prepare(
+      `UPDATE projects SET name = ?, created_at = ?, status = ?, default_cwd = ?, hive_root_path = ?, god_character = ?
+       WHERE project_id = ?`
+    ).run(next.name, next.createdAt, next.status, next.defaultCwd, next.hiveRootPath, next.godCharacter, projectId);
+  }
+
+  deleteProjectRow(projectId: string): void {
+    if (!this.db) return;
+    this.db.prepare('DELETE FROM projects WHERE project_id = ?').run(projectId);
   }
 }
 

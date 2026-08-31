@@ -39,6 +39,9 @@ export function classifyEngineAvailability(
   statuses: readonly ToolStatus[] | undefined,
   provider: AgentProvider
 ): EngineAvailability {
+  if (provider === 'builtin') {
+    return { state: 'installed', path: null, installCommand: '' };
+  }
   const row = statuses?.find((s) => s.id === `engine:${provider}`);
   if (!row) return { state: 'unknown', path: null, installCommand: '' };
   const installCommand = row.installCommand ?? '';
@@ -74,5 +77,5 @@ export function engineAvailabilityMessage(a: EngineAvailability, label: string):
   if (a.state !== 'not-installable') return null;
   return `${label} is not installed on this computer and the app has no installer for it, ` +
     `so Michael could not start. Install it first, then press "check again". ` +
-    `Or pick Claude Code, which installs itself on first run.`;
+    `Or pick Built in, which needs no install.`;
 }

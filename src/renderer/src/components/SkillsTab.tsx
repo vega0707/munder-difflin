@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PixelButton } from './PixelButton';
+import { SeatToolsPanel } from './SeatToolsPanel';
 import type { LocalSkill, CatalogSkill } from '../../../preload';
 
 type Mode = 'installed' | 'browse';
@@ -34,7 +35,7 @@ function Chip({ text, tone = 'quiet' }: { text: string; tone?: 'quiet' | 'accent
   );
 }
 
-export function SkillsTab({ agentCwd }: { agentCwd?: string }) {
+export function SkillsTab({ agentCwd, agentId }: { agentCwd?: string; agentId?: string }) {
   const { t } = useTranslation();
   const [mode, setMode] = useState<Mode>('installed');
   const [query, setQuery] = useState('');
@@ -165,6 +166,14 @@ export function SkillsTab({ agentCwd }: { agentCwd?: string }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%' }}>
+      {agentId && (
+        <div style={{
+          flexShrink: 0, padding: '8px 10px',
+          borderBottom: '1px solid var(--cth-ink-300)'
+        }}>
+          <SeatToolsPanel agentId={agentId} />
+        </div>
+      )}
       {/* Controls */}
       <div style={{
         flexShrink: 0, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',

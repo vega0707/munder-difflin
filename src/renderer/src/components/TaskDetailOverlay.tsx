@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '@/store/store';
-import { TaskDetail, parseTasks, type HiveTask } from './TasksKanban';
+import { TaskDetail } from './TasksKanban';
+import { parseTasks, type HiveTask } from './hiveTasks';
 
 /**
  * App-wide host for the task detail: whoever calls store.openTaskDetail(id) —
