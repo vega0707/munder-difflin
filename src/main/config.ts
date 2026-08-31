@@ -415,6 +415,18 @@ export interface HarnessConfig {
   /** Never condense a file smaller than this; also the section-trigger byte floor.
    *  DECIDED: 16 KB. */
   reflectMinBytes?: number;
+
+  // ─── Seat hub (MultiCA-style coordination; local CLIs still execute) ──────
+  /** Remote SeatHub base URL (`http://host:3851`). Empty = this machine's seats.json. */
+  seatHubUrl?: string;
+  /** Shared token for SeatHub. Never logged, never mailed into hive. */
+  seatHubToken?: string;
+  /** Serve a SeatHub on this machine so other runtimes can take over seats. */
+  seatHubListen?: boolean;
+  /** Port when `seatHubListen` is on. Default 3851. */
+  seatHubPort?: number;
+  /** Bind address when serving. Default 127.0.0.1; set 0.0.0.0 for LAN. */
+  seatHubBind?: string;
 }
 
 const DEFAULTS: HarnessConfig = {
@@ -482,7 +494,12 @@ const DEFAULTS: HarnessConfig = {
   // v0.3.4 fix: default OFF, matching the field's own documentation ("Default
   // OFF / dark until enabled") — the true default contradicted it. Existing
   // installs keep their persisted value.
-  knowledgeGraph: { enabled: false }
+  knowledgeGraph: { enabled: false },
+  seatHubUrl: '',
+  seatHubToken: '',
+  seatHubListen: false,
+  seatHubPort: 3851,
+  seatHubBind: '127.0.0.1'
 };
 
 function configPath(): string {

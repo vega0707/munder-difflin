@@ -35,14 +35,23 @@ import { PersistStore } from './db';
 import { ProjectRegistry, projectRootOf } from './projectRegistry';
 import { resolveHive, projectIdFromPayload } from './hiveRouter';
 import { listProjectTemplates, saveProjectTemplate, deleteProjectTemplate } from './projectTemplateStore';
-import { SeatBoard } from './seatBoard';
+import { SeatBoard, FileSeatStore } from './seatBoard';
+import { SeatHub } from './seatHub';
 import { BuiltinAgentHost } from './builtinAgentHost';
 import {
   MAX_ACTIVE_AGENTS,
   DEFAULT_PROJECT_ID,
   parseAgentPtyId,
-  type CreateProjectRole
+  isOfficeCharacter,
+  type CreateProjectRole,
+  type OfficeCharacterName
 } from '../shared/projectTypes';
+import {
+  DEFAULT_SEAT_HUB_PORT,
+  SEAT_HEARTBEAT_MS,
+  type FloorCatalog,
+  type SeatHandoff
+} from '../shared/seats';
 import { readAgentUsage, readContextTokens, seedSessionTranscript, resolveSessionCwd } from './transcript';
 import { listIssues, listCIRuns } from './github';
 import { SlackWebhookServer, SlackReplyServer, postSlackReply, type SlackEventFile } from './slack';
@@ -82,6 +91,7 @@ import { parseHireDeepLink, type HireManifest } from '../shared/hire';
 import { ClosingTimeController } from './closingTime';
 import {
   argsWithAutoModeFlag,
+  defaultCommandForProvider,
   inferAgentProvider,
   isClaudeProvider,
   nonInteractiveEnvForProvider,
@@ -392,13 +402,200 @@ function runtimeId(): string {
   persist.setKv(RUNTIME_ID_KV, id);
   return id;
 }
+const fileSeatStore = new FileSeatStore({
+  getHarnessHome: () => readConfig().harnessHome ?? null
+});
 const seatBoard = new SeatBoard({
-  getHarnessHome: () => readConfig().harnessHome ?? null,
+  store: fileSeatStore,
   getRuntimeId: runtimeId,
   hostLabel: () => {
     try { return hostname(); } catch { return 'local'; }
-  }
+  },
+  getHubUrl: () => {
+    const url = readConfig().seatHubUrl?.trim();
+    return url || null;
+  },
+  getHubToken: () => readConfig().seatHubToken ?? ''
 });
+let seatHub: SeatHub | null = null;
+let seatHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
+let seatBeatCount = 0;
+let seatDrain: Promise<void> = Promise.resolve();
+function ensureSeatHubToken(): string {
+  const current = readConfig().seatHubToken;
+  if (typeof current === 'string' && current.length >= 16) return current;
+  const token = randomBytes(24).toString('hex');
+  writeConfig({ seatHubToken: token });
+  return token;
+}
+async function syncSeatHub(): Promise<{ ok: boolean; url?: string; error?: string; listening: boolean }> {
+  const cfg = readConfig();
+  const remote = cfg.seatHubUrl?.trim();
+  if (remote || !cfg.seatHubListen) {
+    if (seatHub) { try { seatHub.stop(); } catch { /* best-effort */ } seatHub = null; }
+    startSeatHeartbeat();
+    return { ok: true, listening: false };
+  }
+  ensureSeatHubToken();
+  if (seatHub) { try { seatHub.stop(); } catch { /* best-effort */ } seatHub = null; }
+  seatHub = new SeatHub({
+    port: cfg.seatHubPort && cfg.seatHubPort > 0 ? cfg.seatHubPort : DEFAULT_SEAT_HUB_PORT,
+    bind: (cfg.seatHubBind && cfg.seatHubBind.trim()) || '127.0.0.1',
+    token: () => readConfig().seatHubToken ?? '',
+    store: fileSeatStore
+  });
+  const started = await seatHub.start();
+  startSeatHeartbeat();
+  if (!started.ok) {
+    seatHub = null;
+    return { ok: false, error: started.error, listening: false };
+  }
+  console.log('[seathub] listening', started.url);
+  return { ok: true, url: started.url, listening: true };
+}
+function startSeatHeartbeat(): void {
+  if (seatHeartbeatTimer) return;
+  seatHeartbeatTimer = setInterval(() => { void beatHeldSeats(); }, SEAT_HEARTBEAT_MS);
+  void beatHeldSeats();
+}
+function stopSeatHeartbeat(): void {
+  if (seatHeartbeatTimer) clearInterval(seatHeartbeatTimer);
+  seatHeartbeatTimer = null;
+}
+async function beatHeldSeats(): Promise<void> {
+  seatBeatCount += 1;
+  const pushPack = seatBeatCount % 4 === 0;
+  for (const project of projectRegistry.listProjects()) {
+    let rows: Awaited<ReturnType<SeatBoard['list']>>;
+    try { rows = await seatBoard.list(project.projectId); } catch { continue; }
+    for (const row of rows) {
+      if (row.occupancy !== 'local') continue;
+      try { await seatBoard.heartbeat(project.projectId, row.agentId, { provider: row.provider }); } catch { /* next beat */ }
+      if (pushPack) {
+        try {
+          const pack = await collectHandoff(project.projectId, row.agentId);
+          if (pack) await seatBoard.putHandoff(project.projectId, row.agentId, pack);
+        } catch { /* best-effort */ }
+      }
+    }
+  }
+}
+async function drainSeats(): Promise<void> {
+  for (const project of projectRegistry.listProjects()) {
+    let rows: Awaited<ReturnType<SeatBoard['list']>>;
+    try { rows = await seatBoard.list(project.projectId); } catch { continue; }
+    for (const row of rows) {
+      if (row.occupancy !== 'local') continue;
+      try {
+        const pack = await collectHandoff(project.projectId, row.agentId);
+        if (pack) await seatBoard.putHandoff(project.projectId, row.agentId, pack);
+      } catch { /* still vacate */ }
+      try { await seatBoard.vacate(project.projectId, row.agentId); } catch { /* lease will expire */ }
+    }
+  }
+}
+async function gitSnapshot(cwd: string | undefined): Promise<SeatHandoff['git']> {
+  if (!cwd) return undefined;
+  try {
+    if (!(await isRepo(cwd))) return undefined;
+    const branch = await getBranch(cwd);
+    const status = await getStatus(cwd);
+    const log = await getLog(cwd, 1);
+    const dirty = !('error' in status)
+      && (status.staged.length + status.unstaged.length + status.untracked.length) > 0;
+    return {
+      branch: !('error' in branch) ? (branch.current ?? undefined) : undefined,
+      head: Array.isArray(log) && log[0] ? log[0].sha : undefined,
+      dirty
+    };
+  } catch {
+    return undefined;
+  }
+}
+async function collectHandoff(projectId: string, agentId: string): Promise<SeatHandoff | null> {
+  const h = resolveHive(projectRegistry, hive, projectId);
+  let identity = '';
+  try {
+    const root = h.root();
+    if (root) {
+      const p = join(root, 'agents', agentId, 'identity.md');
+      if (existsSync(p)) identity = readFileSync(p, 'utf8');
+    }
+  } catch { /* best-effort */ }
+  const meta = h.registry().agents[agentId];
+  const project = projectRegistry.getMeta(projectId);
+  const cwd = meta?.cwd;
+  let character: string | undefined;
+  try {
+    const home = readConfig().harnessHome;
+    if (home) {
+      const snap = new RosterStore(() => projectRootOf(home, projectId)).read();
+      const row = Array.isArray(snap?.agents)
+        ? snap.agents.find((raw) => (raw as { id?: string }).id === agentId) as { character?: string } | undefined
+        : undefined;
+      if (typeof row?.character === 'string') character = row.character;
+    }
+  } catch { /* optional */ }
+  return seatBoard.exportHandoff({
+    projectId,
+    projectName: project?.name,
+    agentId,
+    agentName: meta?.name,
+    role: meta?.role,
+    character,
+    provider: meta?.provider,
+    cwd,
+    sessionId: meta?.sessionId,
+    identity,
+    memory: h.memory(agentId),
+    inbox: h.inbox(agentId),
+    git: await gitSnapshot(cwd),
+    hiveRootPath: project?.hiveRootPath
+  });
+}
+function floorCatalogOf(projectId: string): FloorCatalog | null {
+  const meta = projectRegistry.getMeta(projectId);
+  const h = projectRegistry.getProject(projectId);
+  if (!meta || !h) return null;
+  const agents: FloorCatalog['agents'] = [];
+  let rosterChars: Record<string, string> = {};
+  try {
+    const home = readConfig().harnessHome;
+    if (home) {
+      const snap = new RosterStore(() => projectRootOf(home, projectId)).read();
+      if (Array.isArray(snap?.agents)) {
+        for (const raw of snap.agents) {
+          const a = raw as { id?: string; character?: string };
+          if (typeof a.id === 'string' && typeof a.character === 'string') rosterChars[a.id] = a.character;
+        }
+      }
+    }
+  } catch { /* optional */ }
+  try {
+    for (const [id, agent] of Object.entries(h.registry().agents)) {
+      if (agent.archived || agent.isAssistant) continue;
+      agents.push({
+        agentId: id,
+        name: agent.name,
+        role: agent.role,
+        character: rosterChars[id],
+        provider: agent.provider
+      });
+    }
+  } catch { /* empty catalog is still publishable */ }
+  return {
+    projectId,
+    name: meta.name,
+    godCharacter: meta.godCharacter,
+    defaultCwd: meta.defaultCwd,
+    agents,
+    updatedAt: Date.now()
+  };
+}
+async function publishFloor(projectId: string): Promise<void> {
+  const floor = floorCatalogOf(projectId);
+  if (floor) await seatBoard.putFloor(floor);
+}
 const builtinHost = new BuiltinAgentHost({
   listHives: () => projectRegistry.listHives(),
   occupancy: (projectId, agentId) => seatBoard.occupancy(projectId, agentId)
@@ -506,7 +703,7 @@ function teardownPty(id: string): void {
   const vacateAgent = parsedSeat?.agentId ?? ptyToAgent.get(id);
   const vacateProject = parsedSeat?.projectId ?? projectRegistry.getActiveProjectId();
   if (vacateAgent && vacateProject) {
-    try { seatBoard.vacate(vacateProject, vacateAgent); } catch { /* best-effort */ }
+    try { void seatBoard.vacate(vacateProject, vacateAgent); } catch { /* best-effort */ }
   }
   // Ephemeral-worker flag, read BEFORE the cleanup below deletes the entry. All
   // worker deaths (done-release, idle/token reap, manual stop, crash) funnel
@@ -2634,7 +2831,7 @@ async function spawnAgentCore(opts: AgentSpawnOptions, owner: Electron.WebConten
   opts.provider = provider;
   if (opts.hive) opts.hive = { ...opts.hive, provider };
   const seatAgentId = opts.hive?.id || parseAgentPtyId(opts.id)?.agentId;
-  if (seatAgentId && opts.projectId && seatBoard.occupancy(opts.projectId, seatAgentId) === 'remote') {
+  if (seatAgentId && opts.projectId && (await seatBoard.occupancy(opts.projectId, seatAgentId)) === 'remote') {
     return { ok: false, error: 'this seat is claimed on another machine', code: 'SEAT_TAKEN' } as { ok: boolean; error?: string };
   }
   if (provider === 'builtin') {
@@ -2642,7 +2839,7 @@ async function spawnAgentCore(opts: AgentSpawnOptions, owner: Electron.WebConten
     const h = resolveHive(projectRegistry, hive, opts.projectId);
     if (opts.hive) await h.ensureAgent({ ...opts.hive, provider: 'builtin' });
     if (seatAgentId && opts.projectId) {
-      const claimed = seatBoard.claim(opts.projectId, seatAgentId, { provider: 'builtin' });
+      const claimed = await seatBoard.claim(opts.projectId, seatAgentId, { provider: 'builtin' });
       if (!claimed.ok) {
         return { ok: false, error: claimed.error, code: claimed.code } as { ok: boolean; error?: string };
       }
@@ -3036,7 +3233,7 @@ async function spawnAgentCore(opts: AgentSpawnOptions, owner: Electron.WebConten
   if (res.ok) analytics.track('agent_spawned', { provider });
   else analytics.track('agent_spawn_failed', { provider, reason: spawnFailReason(res.error) });
   if (res.ok && seatAgentId && opts.projectId) {
-    try { seatBoard.claim(opts.projectId, seatAgentId, { provider }); } catch { /* best-effort */ }
+    try { await seatBoard.claim(opts.projectId, seatAgentId, { provider }); } catch { /* best-effort */ }
   }
   syncKeepAwake(); // arm the power-save blocker while ≥1 agent PTY is alive (#18)
   // Hand the resolved worktree path back to the renderer so it can persist it on
@@ -3246,6 +3443,14 @@ ipcMain.handle('config:update', (_evt, patch: Partial<HarnessConfig>) => {
   // config per tick so it gates immediately; this is for the PROMPT, which is
   // built per spawn, so flipping the toggle reaches god the next time he starts.
   if (typeof patch?.orchestratorMaySpawn === 'boolean') hive.setOrchestratorMaySpawn(patch.orchestratorMaySpawn);
+  if (
+    patch && (
+      'seatHubUrl' in patch || 'seatHubToken' in patch || 'seatHubListen' in patch
+      || 'seatHubPort' in patch || 'seatHubBind' in patch
+    )
+  ) {
+    void syncSeatHub().catch((e) => console.error('[seathub] sync after config:', e));
+  }
   if (!hiveWasEnabled && hive.enabled()) {
     console.log('[hive] harnessHome configured — bootstrapping hive services');
     try { bootstrapHiveServices(); } catch (e) { console.error('[hive] bootstrap after onboarding:', e); }
@@ -3515,6 +3720,7 @@ ipcMain.handle('project:create', async (_evt, payload: unknown) => {
   });
   if (res.ok) {
     try { bootstrapHiveServices(); } catch (e) { console.error('[project] bootstrap after create:', e); }
+    void publishFloor(res.project.projectId);
     return { ...res, roster: roster.read() };
   }
   return res;
@@ -3618,7 +3824,7 @@ ipcMain.handle('seat:claim', (_evt, payload: unknown) => {
     provider: typeof body.provider === 'string' ? body.provider : undefined
   });
 });
-ipcMain.handle('seat:vacate', (_evt, payload: unknown) => {
+ipcMain.handle('seat:vacate', async (_evt, payload: unknown) => {
   const body = payload && typeof payload === 'object' ? payload as {
     projectId?: unknown; agentId?: unknown; force?: unknown;
   } : {};
@@ -3628,9 +3834,15 @@ ipcMain.handle('seat:vacate', (_evt, payload: unknown) => {
   if (!projectId || typeof body.agentId !== 'string') {
     return { ok: false, code: 'PROJECT_NOT_FOUND', error: 'projectId and agentId required' };
   }
+  if (body.force !== true) {
+    try {
+      const pack = await collectHandoff(projectId, body.agentId);
+      if (pack) await seatBoard.putHandoff(projectId, body.agentId, pack);
+    } catch { /* still vacate */ }
+  }
   return seatBoard.vacate(projectId, body.agentId, { force: body.force === true });
 });
-ipcMain.handle('seat:exportHandoff', (_evt, payload: unknown) => {
+ipcMain.handle('seat:exportHandoff', async (_evt, payload: unknown) => {
   const body = payload && typeof payload === 'object' ? payload as {
     projectId?: unknown; agentId?: unknown;
   } : {};
@@ -3640,30 +3852,172 @@ ipcMain.handle('seat:exportHandoff', (_evt, payload: unknown) => {
   if (!projectId || typeof body.agentId !== 'string') {
     return { ok: false, error: 'projectId and agentId required' };
   }
-  const h = hiveIPC(projectId);
-  let identity = '';
-  try {
-    const root = h.root();
-    if (root) {
-      const p = join(root, 'agents', body.agentId, 'identity.md');
-      if (existsSync(p)) identity = readFileSync(p, 'utf8');
+  const pack = await collectHandoff(projectId, body.agentId);
+  if (!pack) return { ok: false, error: 'could not export handoff' };
+  try { await seatBoard.putHandoff(projectId, body.agentId, pack); } catch { /* clipboard still works */ }
+  return { ok: true, handoff: pack };
+});
+ipcMain.handle('seat:listFloors', () => seatBoard.listFloors());
+ipcMain.handle('seat:importFloor', async (_evt, payload: unknown) => {
+  const body = payload && typeof payload === 'object' ? payload as { projectId?: unknown } : {};
+  if (typeof body.projectId !== 'string' || !body.projectId) {
+    return { ok: false, code: 'PROJECT_NOT_FOUND', error: 'projectId required' };
+  }
+  const floor = await seatBoard.getFloor(body.projectId);
+  if (!floor) return { ok: false, code: 'PROJECT_NOT_FOUND', error: 'floor not on hub' };
+  if (!isOfficeCharacter(floor.godCharacter)) {
+    return { ok: false, code: 'GOD_REQUIRED', error: 'floor catalog has no office god' };
+  }
+  const imported = await projectRegistry.importProject({
+    projectId: floor.projectId,
+    name: floor.name,
+    godCharacter: floor.godCharacter as OfficeCharacterName,
+    defaultCwd: floor.defaultCwd,
+    agents: floor.agents
+  });
+  if (imported.ok) {
+    try { bootstrapHiveServices(); } catch (e) { console.error('[seathub] bootstrap after import:', e); }
+    return { ...imported, roster: roster.read(), projects: projectRegistry.listProjects() };
+  }
+  return imported;
+});
+ipcMain.handle('seat:hubStatus', () => {
+  const cfg = readConfig();
+  return {
+    listen: cfg.seatHubListen === true,
+    listening: Boolean(seatHub?.address()),
+    url: seatHub?.address() ?? null,
+    hubUrl: cfg.seatHubUrl ?? '',
+    tokenSet: Boolean(cfg.seatHubToken),
+    port: cfg.seatHubPort ?? DEFAULT_SEAT_HUB_PORT,
+    bind: cfg.seatHubBind ?? '127.0.0.1'
+  };
+});
+ipcMain.handle('seat:hubStart', async () => {
+  writeConfig({ seatHubListen: true });
+  ensureSeatHubToken();
+  return syncSeatHub();
+});
+ipcMain.handle('seat:hubStop', async () => {
+  writeConfig({ seatHubListen: false });
+  return syncSeatHub();
+});
+ipcMain.handle('seat:takeOver', async (evt, payload: unknown) => {
+  const body = payload && typeof payload === 'object' ? payload as {
+    projectId?: unknown; agentId?: unknown; force?: unknown; spawn?: unknown; cwd?: unknown; provider?: unknown;
+  } : {};
+  const projectId = typeof body.projectId === 'string' && body.projectId
+    ? body.projectId
+    : projectRegistry.getActiveProjectId();
+  if (!projectId || typeof body.agentId !== 'string') {
+    return { ok: false, code: 'PROJECT_NOT_FOUND', error: 'projectId and agentId required' };
+  }
+  const agentId = body.agentId;
+  if (!projectRegistry.getMeta(projectId)) {
+    const floor = await seatBoard.getFloor(projectId);
+    if (floor && isOfficeCharacter(floor.godCharacter)) {
+      const imported = await projectRegistry.importProject({
+        projectId: floor.projectId,
+        name: floor.name,
+        godCharacter: floor.godCharacter,
+        defaultCwd: floor.defaultCwd,
+        agents: floor.agents
+      });
+      if (!imported.ok) return imported;
+      try { bootstrapHiveServices(); } catch { /* continue */ }
     }
-  } catch { /* best-effort */ }
-  const meta = h.registry().agents[body.agentId];
+  }
+  const pack = await seatBoard.getHandoff(projectId, agentId);
+  const claimed = await seatBoard.claim(projectId, agentId, {
+    force: body.force === true,
+    provider: typeof body.provider === 'string'
+      ? body.provider
+      : (pack?.provider)
+  });
+  if (!claimed.ok) return claimed;
+  const h = resolveHive(projectRegistry, hive, projectId);
   const project = projectRegistry.getMeta(projectId);
+  const requestedCwd = typeof body.cwd === 'string' ? expandTilde(body.cwd) : '';
+  const packCwd = pack?.cwd ? expandTilde(pack.cwd) : '';
+  const fallbackCwd = project?.defaultCwd
+    ? expandTilde(project.defaultCwd)
+    : (readConfig().harnessHome ? projectRootOf(readConfig().harnessHome!, projectId) : '');
+  const cwdExists = (p: string) => Boolean(p) && existsSync(p);
+  const cwd = cwdExists(requestedCwd) ? requestedCwd
+    : cwdExists(packCwd) ? packCwd
+    : fallbackCwd;
+  const cwdMissing = Boolean(packCwd) && !cwdExists(packCwd) && cwd !== packCwd;
+  const provider = (typeof body.provider === 'string' ? body.provider : pack?.provider || 'claude') as AgentProvider;
+  try {
+    await h.ensureAgent({
+      id: agentId,
+      name: pack?.agentName || agentId,
+      cwd: cwd || fallbackCwd,
+      role: pack?.role,
+      provider
+    });
+    if (pack) {
+      h.applyHandoffPack(agentId, {
+        identity: pack.identity,
+        memory: pack.memory,
+        inbox: pack.inbox
+      });
+    }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+  void publishFloor(projectId);
+  const shouldSpawn = body.spawn !== false;
+  if (!shouldSpawn) {
+    return { ok: true, occupancy: claimed.occupancy, handoff: pack, cwd, cwdMissing, spawned: false };
+  }
+  const commandLine = pack?.command || defaultCommandForProvider(provider, readConfig().defaultCommand);
+  const parts = commandLine.trim().split(/\s+/).filter(Boolean);
+  const exe = provider === 'builtin' ? 'builtin' : (parts[0] || 'claude');
+  const args = provider === 'builtin' ? [] : parts.slice(1);
+  const ptyId = `pty:${projectId}:${agentId}`;
+  const owner = BrowserWindow.fromWebContents(evt.sender)?.webContents ?? null;
+  const spawned = await spawnAgentCore({
+    id: ptyId,
+    cwd: cwd || fallbackCwd || homedir(),
+    command: exe,
+    args,
+    cols: 100,
+    rows: 30,
+    projectId,
+    provider,
+    hive: {
+      id: agentId,
+      name: pack?.agentName || agentId,
+      cwd: cwd || fallbackCwd || homedir(),
+      role: pack?.role,
+      provider
+    }
+  }, owner);
+  if (!spawned.ok) {
+    return {
+      ok: false,
+      code: spawned.code,
+      error: spawned.error || 'spawn failed',
+      occupancy: claimed.occupancy,
+      cwd,
+      cwdMissing
+    };
+  }
   return {
     ok: true,
-    handoff: seatBoard.exportHandoff({
-      projectId,
-      projectName: project?.name,
-      agentId: body.agentId,
-      agentName: meta?.name,
-      role: meta?.role,
-      provider: meta?.provider,
-      identity,
-      memory: h.memory(body.agentId),
-      hiveRootPath: project?.hiveRootPath
-    })
+    occupancy: claimed.occupancy,
+    handoff: pack,
+    cwd: spawned.cwd || cwd,
+    cwdMissing,
+    spawned: true,
+    builtin: spawned.builtin === true,
+    ptyId: spawned.builtin ? undefined : ptyId,
+    provider,
+    agentName: pack?.agentName || agentId,
+    role: pack?.role,
+    character: pack?.character,
+    syncNote: pack?.syncNote
   };
 });
 
@@ -3980,6 +4334,10 @@ function teardownAndQuit(): void {
   try { stopWebhookServer(); } catch (e) { console.error('[quit] webhook.stop:', e); }
   try { memory.stop(); } catch (e) { console.error('[quit] memory.stop:', e); }
   try { reflector.stop(); } catch (e) { console.error('[quit] reflector.stop:', e); }
+  try { stopSeatHeartbeat(); } catch (e) { console.error('[quit] seat heartbeat:', e); }
+  try { seatDrain = drainSeats(); } catch (e) { console.error('[quit] drainSeats:', e); }
+  try { seatHub?.stop(); seatHub = null; } catch (e) { console.error('[quit] seathub.stop:', e); }
+  try { builtinHost.stop(); } catch (e) { console.error('[quit] builtinHost.stop:', e); }
   try { persist.close(); } catch (e) { console.error('[quit] persist.close:', e); }
   try { hive.stopAllProxyBridges(); } catch (e) { console.error('[quit] stopAllProxyBridges:', e); }
   try { ptyManager.killAll(); } catch (e) { console.error('[quit] killAll:', e); }
@@ -5290,6 +5648,7 @@ function bootstrapHiveServices(): void {
   reflector.start();
   armAlwaysOnBeats();
   builtinHost.start();
+  void syncSeatHub().catch((e) => console.error('[seathub] auto-start:', e));
   hiveServicesStarted = true;
 }
 
@@ -5584,7 +5943,7 @@ app.on('will-quit', (e) => {
   e.preventDefault();
   const finish = (): void => app.exit(0);
   Promise.race([
-    analytics.endSession(),
+    Promise.all([analytics.endSession(), seatDrain]),
     new Promise<void>((r) => setTimeout(r, 1200))
   ]).then(finish, finish);
 });

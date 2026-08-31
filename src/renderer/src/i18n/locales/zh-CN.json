@@ -159,6 +159,7 @@
     "makeGod": "升为本层 god",
     "ownFloor": "给他们自己一层",
     "claimSeat": "接管座位",
+    "takeOver": "接管并拉起",
     "vacateSeat": "让出",
     "exportHandoff": "复制交接",
     "promoteConfirm": "让 {{name}} 成为本层 god？现任调度者会留在楼层当员工。",
@@ -169,7 +170,12 @@
     "handoffCopied": "交接 JSON 已复制——到要接管的机器上粘贴。",
     "seatRemote": "座位在 {{host}} 上",
     "seatLocal": "座位在本机",
-    "seatVacant": "座位空闲——可在本机或共享同一 hive 的另一台机器上接管。"
+    "seatVacant": "座位空闲——可在本机接管。关机后租约过期，另一台 Cursor 或 Claude Code 就能坐上这个位子。",
+    "seatExpired": "{{host}} 的租约已过期——可在本机接管。",
+    "seatLease": "租约 {{seconds}} 秒",
+    "takeOverDone": "本机已占座，正在拉起 CLI。",
+    "takeOverSpawned": "已接管",
+    "takeOverCwdMissing": "座位已接管，但上一台机器的工作目录不在这台磁盘上。请先 clone/pull 同一个仓库，再在该文件夹里 spawn。Hub 不会把代码树拷过来。"
   },
   "settingsHero": {
     "sponsoredBy": "赞助方",
@@ -353,7 +359,15 @@
       "orgKeyDesc": "队友的安装如何找到你的实例。",
       "apiKey": "API 密钥",
       "orgKeyPlaceholder": "粘贴你的组织密钥",
-      "orgConfigOnly": "目前仅限配置。组织消息服务尚不存在，所以这里的密钥不会启动任何传输——它会被保存、显示在触发器标签页中，然后等待。"
+      "orgConfigOnly": "目前仅限配置。组织消息服务尚不存在，所以这里的密钥不会启动任何传输——它会被保存、显示在触发器标签页中，然后等待。",
+      "seatHub": "座位 Hub",
+      "seatHubDesc": "协调层（类似 MultiCA）：座位记在 Hub 上，真正跑 Claude Code / Cursor 的仍是本机。每台电脑填同一个 Hub URL。这台关机后租约大约 90 秒过期，另一台就能接管这个角色。Hub 只存身份、记忆和收件箱，不存代码树和 API 密钥。",
+      "seatHubListening": "● 正在提供 {{url}}",
+      "seatHubIdle": "○ 未提供服务",
+      "seatHubUrl": "Hub URL（其他机器填写）",
+      "seatHubToken": "共享令牌",
+      "seatHubTokenPlaceholder": "每台机器填同一个令牌",
+      "seatHubBind": "绑定地址（本机当 Hub 时）"
     },
     "voice": {
       "freeFlow": "自由输入",

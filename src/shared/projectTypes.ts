@@ -55,7 +55,14 @@ export const SEAT_CHANNELS = {
   LIST: 'seat:list',
   CLAIM: 'seat:claim',
   VACATE: 'seat:vacate',
-  EXPORT: 'seat:exportHandoff'
+  HEARTBEAT: 'seat:heartbeat',
+  EXPORT: 'seat:exportHandoff',
+  TAKE_OVER: 'seat:takeOver',
+  LIST_FLOORS: 'seat:listFloors',
+  IMPORT_FLOOR: 'seat:importFloor',
+  HUB_STATUS: 'seat:hubStatus',
+  HUB_START: 'seat:hubStart',
+  HUB_STOP: 'seat:hubStop'
 } as const;
 
 export type ProjectErrorCode =

@@ -159,6 +159,7 @@
     "makeGod": "Make god of this floor",
     "ownFloor": "Give them their own floor",
     "claimSeat": "Claim seat",
+    "takeOver": "Take over",
     "vacateSeat": "Vacate",
     "exportHandoff": "Copy handoff",
     "promoteConfirm": "Make {{name}} the god of this floor? The current orchestrator stays on as a worker.",
@@ -169,7 +170,12 @@
     "handoffCopied": "Handoff JSON copied — paste it on the machine that should take over.",
     "seatRemote": "Seat held on {{host}}",
     "seatLocal": "Seat held on this machine",
-    "seatVacant": "Seat vacant — claim it here or on another machine that shares this hive."
+    "seatVacant": "Seat vacant — take over here. Another Cursor or Claude Code can claim it after this machine's lease expires.",
+    "seatExpired": "Lease from {{host}} expired — take over on this machine.",
+    "seatLease": "lease {{seconds}}s",
+    "takeOverDone": "This machine holds the seat and the CLI is starting.",
+    "takeOverSpawned": "took over",
+    "takeOverCwdMissing": "Seat taken, but the previous cwd is not on this disk. Clone/pull the repo, then spawn in that folder. The hub does not copy the working tree."
   },
   "settingsHero": {
     "sponsoredBy": "Sponsored by",
@@ -353,7 +359,15 @@
       "orgKeyDesc": "How a teammate's install addresses yours.",
       "apiKey": "API key",
       "orgKeyPlaceholder": "paste your organisation key",
-      "orgConfigOnly": "Configuration only for now. The organisation messaging service does not exist yet, so a key here starts no transport — it is saved, shown in the Triggers tab, and waits."
+      "orgConfigOnly": "Configuration only for now. The organisation messaging service does not exist yet, so a key here starts no transport — it is saved, shown in the Triggers tab, and waits.",
+      "seatHub": "Seat hub",
+      "seatHubDesc": "Coordination layer, like MultiCA: seats live on the hub, Claude Code / Cursor still run on a local machine. Point every computer at the same hub URL. If this machine shuts down, the lease expires (~90s) and another runtime can take the chair. The hub stores identity, memory, and inbox — not the git working tree and not API keys.",
+      "seatHubListening": "● Serving {{url}}",
+      "seatHubIdle": "○ Not serving",
+      "seatHubUrl": "Hub URL (other machines)",
+      "seatHubToken": "Shared token",
+      "seatHubTokenPlaceholder": "same token on every machine",
+      "seatHubBind": "Bind (this machine as hub)"
     },
     "voice": {
       "freeFlow": "Free Flow",

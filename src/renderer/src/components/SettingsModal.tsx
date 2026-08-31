@@ -401,6 +401,15 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
   const [tunnelUrl, setTunnelUrl] = useState('');
   const [slackBusy, setSlackBusy] = useState(false);
   const [slackNote, setSlackNote] = useState('');
+  const [seatHubUrl, setSeatHubUrl] = useState(config.seatHubUrl ?? '');
+  const [seatHubToken, setSeatHubToken] = useState(config.seatHubToken ?? '');
+  const [seatHubListen, setSeatHubListen] = useState(config.seatHubListen === true);
+  const [seatHubPort, setSeatHubPort] = useState(String(config.seatHubPort ?? 3851));
+  const [seatHubBind, setSeatHubBind] = useState(config.seatHubBind ?? '127.0.0.1');
+  const [seatHubBusy, setSeatHubBusy] = useState(false);
+  const [seatHubNote, setSeatHubNote] = useState('');
+  const [seatHubListening, setSeatHubListening] = useState(false);
+  const [seatHubListenUrl, setSeatHubListenUrl] = useState('');
   // Whether the webhook server is currently live. Hydrated from main on open so
   // reopening Settings shows the true connection state + the persisted Request URL.
   const [running, setRunning] = useState(false);
@@ -552,6 +561,11 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
       setSlackChannel(cc.slackChannelId ?? '');
       setSlackPort(String(cc.slackPort ?? 3847));
       setSlackProactivePosting(cc.slackProactivePosting ?? false);
+      setSeatHubUrl(cc.seatHubUrl ?? '');
+      setSeatHubToken(cc.seatHubToken ?? '');
+      setSeatHubListen(cc.seatHubListen === true);
+      setSeatHubPort(String(cc.seatHubPort ?? 3851));
+      setSeatHubBind(cc.seatHubBind ?? '127.0.0.1');
       const kgOn = (cc as { knowledgeGraph?: { enabled?: boolean } }).knowledgeGraph?.enabled === true;
       setKgEnabled(kgOn);
       setFreeflowEnabled(cc.freeflowEnabled !== false);
@@ -568,6 +582,11 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
       setRunning(s.running);
       if (s.url) setTunnelUrl(s.url);
     }).catch(() => { /* status unavailable - assume not running */ });
+    window.cth.seatHubStatus?.().then((s) => {
+      if (!alive) return;
+      setSeatHubListening(s.listening);
+      if (s.url) setSeatHubListenUrl(s.url);
+    }).catch(() => { /* hub status optional */ });
     // Triggers: re-read main and push the result into the shared mirror. App
     // already seeded it at launch; this catches anything the Triggers tab (or
     // another window) changed since, and is the ONLY place Settings reads them —
@@ -1436,6 +1455,110 @@ export function SettingsModal({ config, onClose, initialSection }: SettingsModal
                           Leads the section; the hardcoded Slack/Webhook/Free Flow
                           blocks below stay as-is. */}
                       <IntegrationsRegistry />
+
+                      <div style={sectionRule} />
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        <div style={sectionHeadTight}>
+                          {t('settings.connections.seatHub')}
+                        </div>
+                        <div style={{ fontSize: 12, lineHeight: '16px', color: 'var(--cth-ink-500)' }}>
+                          {t('settings.connections.seatHubDesc')}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                          <span style={{
+                            fontSize: 12, lineHeight: '16px',
+                            color: seatHubListening ? 'var(--cth-mint-700, #1f7a4d)' : 'var(--cth-ink-500)'
+                          }}>
+                            {seatHubListening
+                              ? t('settings.connections.seatHubListening', { url: seatHubListenUrl || '…' })
+                              : t('settings.connections.seatHubIdle')}
+                          </span>
+                          <PixelButton
+                            variant={seatHubListen ? 'primary' : 'secondary'}
+                            size="sm"
+                            onClick={() => setSeatHubListen((v) => !v)}
+                          >
+                            {seatHubListen ? t('common.on') : t('common.off')}
+                          </PixelButton>
+                        </div>
+                        <div style={{ display: 'flex', gap: 16 }}>
+                          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
+                            <span style={slackLabelStyle}>{t('settings.connections.seatHubUrl')}</span>
+                            <input
+                              value={seatHubUrl}
+                              onChange={(e) => setSeatHubUrl(e.target.value)}
+                              placeholder="http://192.168.1.10:3851"
+                              style={{ ...slackInputStyle, fontFamily: 'var(--cth-font-mono)' }}
+                            />
+                          </label>
+                          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
+                            <span style={slackLabelStyle}>{t('settings.connections.seatHubToken')}</span>
+                            <input
+                              type="password"
+                              value={seatHubToken}
+                              onChange={(e) => setSeatHubToken(e.target.value)}
+                              placeholder={t('settings.connections.seatHubTokenPlaceholder')}
+                              style={{ ...slackInputStyle, fontFamily: 'var(--cth-font-mono)' }}
+                            />
+                          </label>
+                        </div>
+                        <div style={{ display: 'flex', gap: 16 }}>
+                          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 100 }}>
+                            <span style={slackLabelStyle}>{t('settings.connections.port')}</span>
+                            <input
+                              value={seatHubPort}
+                              onChange={(e) => setSeatHubPort(e.target.value)}
+                              style={{ ...slackInputStyle, fontFamily: 'var(--cth-font-mono)' }}
+                            />
+                          </label>
+                          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
+                            <span style={slackLabelStyle}>{t('settings.connections.seatHubBind')}</span>
+                            <input
+                              value={seatHubBind}
+                              onChange={(e) => setSeatHubBind(e.target.value)}
+                              placeholder="127.0.0.1"
+                              style={{ ...slackInputStyle, fontFamily: 'var(--cth-font-mono)' }}
+                            />
+                          </label>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <PixelButton
+                            size="sm"
+                            disabled={seatHubBusy}
+                            onClick={() => {
+                              void (async () => {
+                                setSeatHubBusy(true); setSeatHubNote('');
+                                try {
+                                  await window.cth.updateConfig({
+                                    seatHubUrl: seatHubUrl.trim(),
+                                    seatHubToken,
+                                    seatHubListen,
+                                    seatHubPort: Number(seatHubPort) || 3851,
+                                    seatHubBind: seatHubBind.trim() || '127.0.0.1'
+                                  });
+                                  const res = seatHubListen
+                                    ? await window.cth.seatHubStart()
+                                    : await window.cth.seatHubStop();
+                                  setSeatHubListening(res.listening);
+                                  const listenUrl = 'url' in res && typeof res.url === 'string' ? res.url : '';
+                                  if (listenUrl) setSeatHubListenUrl(listenUrl);
+                                  setSeatHubNote(res.ok
+                                    ? (res.listening ? t('settings.connections.listening') : t('settings.connections.stopped'))
+                                    : (res.error ?? 'failed'));
+                                } catch (e) {
+                                  setSeatHubNote(e instanceof Error ? e.message : String(e));
+                                } finally { setSeatHubBusy(false); }
+                              })();
+                            }}
+                          >
+                            {t('common.save')}
+                          </PixelButton>
+                          {seatHubNote && (
+                            <span style={{ fontSize: 12, color: 'var(--cth-ink-500)' }}>{seatHubNote}</span>
+                          )}
+                        </div>
+                      </div>
 
                       <div style={sectionRule} />
 

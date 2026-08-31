@@ -25,6 +25,7 @@ export function useProjects(opts: {
   switchError: string | undefined;
   activate: (projectId: string) => Promise<boolean>;
   remove: (projectId: string) => Promise<boolean>;
+  joinFloor: (projectId: string) => Promise<boolean>;
 } {
   const [switchError, setSwitchError] = useState<string | undefined>();
 
@@ -87,5 +88,25 @@ export function useProjects(opts: {
     return true;
   };
 
-  return { switchError, activate, remove };
+  const joinFloor = async (projectId: string): Promise<boolean> => {
+    setSwitchError(undefined);
+    flushRoster();
+    const res = await window.cth.seatImportFloor({ projectId });
+    if (!res.ok) {
+      setSwitchError(res.error || 'Could not join that floor.');
+      return false;
+    }
+    if (res.projects) useStore.getState().setProjectList(res.projects.map(asMeta));
+    else {
+      const list = await window.cth.projectList();
+      useStore.getState().setProjectList(list.map(asMeta));
+    }
+    useStore.getState().setActiveProjectId(res.project.projectId);
+    if (res.roster) {
+      useStore.getState().loadFloorFromRoster(res.roster as Parameters<ReturnType<typeof useStore.getState>['loadFloorFromRoster']>[0]);
+    }
+    return true;
+  };
+
+  return { switchError, activate, remove, joinFloor };
 }

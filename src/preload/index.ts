@@ -331,6 +331,12 @@ export interface HarnessConfig {
   providerBaseUrls?: Partial<Record<AgentProvider, string>>;
   /** Per-CLI-provider default model slug, used to pre-fill the model picker. */
   providerDefaultModels?: Partial<Record<AgentProvider, string>>;
+  /** Seat hub (MultiCA-style coordination). Mirrors src/main/config.ts. */
+  seatHubUrl?: string;
+  seatHubToken?: string;
+  seatHubListen?: boolean;
+  seatHubPort?: number;
+  seatHubBind?: string;
 }
 
 export interface MemoryStatus {
@@ -805,7 +811,16 @@ const api = {
     ipcRenderer.invoke('project:deleteTemplate', id) as Promise<{ ok: true } | { ok: false; error: string }>,
   seatList: (projectId?: string) =>
     ipcRenderer.invoke('seat:list', projectId) as Promise<Array<{
-      agentId: string; occupancy: 'local' | 'vacant' | 'remote'; claimedBy?: string; claimedAt?: number; hostLabel?: string; provider?: string;
+      agentId: string;
+      occupancy: 'local' | 'vacant' | 'remote';
+      claimedBy?: string;
+      claimedAt?: number;
+      heartbeatAt?: number;
+      leaseUntil?: number;
+      hostLabel?: string;
+      provider?: string;
+      expired?: boolean;
+      leaseRemainingMs?: number;
     }>>,
   seatClaim: (input: { projectId?: string; agentId: string; force?: boolean; provider?: string }) =>
     ipcRenderer.invoke('seat:claim', input) as Promise<
@@ -822,6 +837,58 @@ const api = {
       | { ok: true; handoff: Record<string, unknown> }
       | { ok: false; error: string }
     >,
+  seatTakeOver: (input: {
+    projectId?: string; agentId: string; force?: boolean; spawn?: boolean; cwd?: string; provider?: string;
+  }) =>
+    ipcRenderer.invoke('seat:takeOver', input) as Promise<
+      | {
+          ok: true;
+          occupancy: 'local' | 'vacant' | 'remote';
+          cwd?: string;
+          cwdMissing?: boolean;
+          spawned?: boolean;
+          builtin?: boolean;
+          ptyId?: string;
+          provider?: string;
+          agentName?: string;
+          role?: string;
+          character?: string;
+          syncNote?: string;
+          handoff?: Record<string, unknown>;
+        }
+      | { ok: false; code?: string; error: string; occupancy?: string; cwd?: string; cwdMissing?: boolean }
+    >,
+  seatListFloors: () =>
+    ipcRenderer.invoke('seat:listFloors') as Promise<Array<{
+      projectId: string; name: string; godCharacter: string; defaultCwd?: string;
+      agents: Array<{ agentId: string; name: string; role?: string; character?: string; provider?: string }>;
+      updatedAt: number;
+    }>>,
+  seatImportFloor: (input: { projectId: string }) =>
+    ipcRenderer.invoke('seat:importFloor', input) as Promise<
+      | {
+          ok: true;
+          project: {
+            projectId: string; name: string; createdAt: number; status: string;
+            defaultCwd?: string; hiveRootPath: string; godCharacter: string;
+          };
+          projects?: Array<{
+            projectId: string; name: string; createdAt: number; status: string;
+            defaultCwd?: string; hiveRootPath: string; godCharacter: string;
+          }>;
+          roster?: unknown;
+        }
+      | { ok: false; code: string; error: string }
+    >,
+  seatHubStatus: () =>
+    ipcRenderer.invoke('seat:hubStatus') as Promise<{
+      listen: boolean; listening: boolean; url: string | null; hubUrl: string;
+      tokenSet: boolean; port: number; bind: string;
+    }>,
+  seatHubStart: () =>
+    ipcRenderer.invoke('seat:hubStart') as Promise<{ ok: boolean; url?: string; error?: string; listening: boolean }>,
+  seatHubStop: () =>
+    ipcRenderer.invoke('seat:hubStop') as Promise<{ ok: boolean; listening: boolean; error?: string }>,
   onProjectChanged: (cb: (e: { projectId: string; action: string }) => void): (() => void) => {
     const listener = (_e: IpcRendererEvent, payload: { projectId: string; action: string }) => cb(payload);
     ipcRenderer.on('project:changed', listener);

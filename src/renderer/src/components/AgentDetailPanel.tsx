@@ -322,21 +322,29 @@ function EmptyTab({ title, children }: { title: string; children: React.ReactNod
 
 function FloorCareerStrip({ agent }: { agent: Agent }) {
   const { t } = useTranslation();
-  const [busy, setBusy] = useState<'promote' | 'spin' | 'claim' | 'vacate' | 'export' | null>(null);
+  const [busy, setBusy] = useState<'promote' | 'spin' | 'claim' | 'vacate' | 'export' | 'take' | null>(null);
   const [msg, setMsg] = useState<string | undefined>();
   const [occupancy, setOccupancy] = useState<'local' | 'vacant' | 'remote' | undefined>();
   const [hostLabel, setHostLabel] = useState<string | undefined>();
+  const [leaseMs, setLeaseMs] = useState<number>(0);
+  const [expired, setExpired] = useState(false);
   const activeProjectId = useStore((s) => s.activeProjectId);
+  const updateAgent = useStore((s) => s.updateAgent);
 
-  useEffect(() => {
-    let cancelled = false;
+  const refreshSeat = () => {
     void window.cth.seatList?.(activeProjectId ?? undefined).then((rows) => {
-      if (cancelled) return;
       const row = rows.find((r) => r.agentId === agent.id);
       setOccupancy(row?.occupancy);
       setHostLabel(row?.hostLabel);
+      setLeaseMs(row?.leaseRemainingMs ?? 0);
+      setExpired(row?.expired === true);
     }).catch(() => { /* optional IPC on older builds */ });
-    return () => { cancelled = true; };
+  };
+
+  useEffect(() => {
+    refreshSeat();
+    const tmr = setInterval(refreshSeat, 10_000);
+    return () => clearInterval(tmr);
   }, [agent.id, activeProjectId]);
 
   const flash = (text: string) => {
@@ -407,6 +415,33 @@ function FloorCareerStrip({ agent }: { agent: Agent }) {
     } finally { setBusy(null); }
   };
 
+  const takeOver = async () => {
+    if (busy) return;
+    setBusy('take');
+    try {
+      const res = await window.cth.seatTakeOver({
+        projectId: activeProjectId ?? undefined,
+        agentId: agent.id,
+        spawn: true,
+        provider: agent.provider
+      });
+      if (!res.ok) { flash(res.error); return; }
+      setOccupancy(res.occupancy);
+      updateAgent(agent.id, {
+        ptyId: res.ptyId,
+        cwd: res.cwd || agent.cwd,
+        provider: (res.provider as Agent['provider']) ?? agent.provider,
+        command: agent.command,
+        status: 'idle',
+        action: res.cwdMissing ? t('agentDetail.takeOverCwdMissing') : t('agentDetail.takeOverSpawned'),
+        archived: false
+      });
+      if (res.cwdMissing) flash(t('agentDetail.takeOverCwdMissing'));
+      else flash(t('agentDetail.takeOverDone'));
+      refreshSeat();
+    } finally { setBusy(null); }
+  };
+
   const vacate = async () => {
     if (busy) return;
     setBusy('vacate');
@@ -435,11 +470,17 @@ function FloorCareerStrip({ agent }: { agent: Agent }) {
     } finally { setBusy(null); }
   };
 
+  const leaseLabel = leaseMs > 0
+    ? t('agentDetail.seatLease', { seconds: Math.max(1, Math.round(leaseMs / 1000)) })
+    : '';
   const seatLabel = occupancy === 'remote'
-    ? t('agentDetail.seatRemote', { host: hostLabel || 'another machine' })
+    ? `${t('agentDetail.seatRemote', { host: hostLabel || 'another machine' })}${leaseLabel ? ` · ${leaseLabel}` : ''}`
     : occupancy === 'local'
       ? t('agentDetail.seatLocal')
-      : t('agentDetail.seatVacant');
+      : expired
+        ? t('agentDetail.seatExpired', { host: hostLabel || 'another machine' })
+        : t('agentDetail.seatVacant');
+  const canTake = occupancy === 'vacant' || occupancy === undefined;
 
   return (
     <div style={{
@@ -455,6 +496,9 @@ function FloorCareerStrip({ agent }: { agent: Agent }) {
         </PixelButton>
         <PixelButton size="sm" disabled={!!busy} onClick={() => void spinOut()}>
           {t('agentDetail.ownFloor')}
+        </PixelButton>
+        <PixelButton size="sm" disabled={!!busy || !canTake} onClick={() => void takeOver()}>
+          {t('agentDetail.takeOver')}
         </PixelButton>
         <PixelButton size="sm" disabled={!!busy} onClick={() => void claim()}>
           {t('agentDetail.claimSeat')}

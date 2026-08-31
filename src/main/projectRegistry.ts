@@ -137,6 +137,8 @@ export class ProjectRegistry {
     roles: CreateProjectRole[];
     /** Default true — spin-out stays on the source floor. */
     activate?: boolean;
+    /** Join a hub floor using its existing id. Generated when omitted. */
+    projectId?: string;
   }): Promise<ProjectMutationResult> {
     const home = this.opts.getHarnessHome();
     if (!home) return { ok: false, code: 'CREATE_FAILED', error: 'no harnessHome' };
@@ -153,7 +155,11 @@ export class ProjectRegistry {
       return { ok: false, code: 'CREATE_FAILED', error: err instanceof Error ? err.message : String(err) };
     }
 
-    const projectId = randomUUID();
+    const requested = typeof input.projectId === 'string' ? input.projectId.trim() : '';
+    const projectId = requested && /^[A-Za-z0-9._-]{1,80}$/.test(requested) ? requested : randomUUID();
+    if (this.metas.has(projectId) || this.opts.persist.getProject(projectId)) {
+      return { ok: false, code: 'CREATE_FAILED', error: 'project already exists' };
+    }
     const projectRoot = projectRootOf(home, projectId);
     const hiveRootPath = join(projectRoot, 'hive');
     const cwd = input.defaultCwd?.trim() || projectRoot;
@@ -279,6 +285,37 @@ export class ProjectRegistry {
     this.opts.persist.deleteProjectRow(projectId);
     this.opts.emit?.('project:changed', { projectId, action: 'delete' });
     return { ok: true, project: meta };
+  }
+
+  /**
+   * Materialize a hub floor on this machine. Same projectId as the catalog so
+   * seats line up. If the floor is already local, return it.
+   */
+  async importProject(input: {
+    projectId: string;
+    name: string;
+    godCharacter: OfficeCharacterName;
+    defaultCwd?: string;
+    agents?: Array<{ agentId: string; name?: string; character?: string }>;
+  }): Promise<ProjectMutationResult> {
+    const existing = this.metas.get(input.projectId);
+    if (existing) return { ok: true, project: existing };
+    const extras = new Set<OfficeCharacterName>();
+    for (const a of input.agents ?? []) {
+      const ch = a.character || a.agentId;
+      if (isOfficeCharacter(ch) && ch !== input.godCharacter) extras.add(ch);
+    }
+    const roles: CreateProjectRole[] = [
+      { character: input.godCharacter, asGod: true },
+      ...[...extras].map((character) => ({ character, asGod: false }))
+    ];
+    return this.createProject({
+      name: input.name,
+      defaultCwd: input.defaultCwd,
+      roles,
+      projectId: input.projectId,
+      activate: true
+    });
   }
 
   /** Copy `<harnessHome>/hive` into `projects/default` and rename the original. */

@@ -149,6 +149,12 @@ export interface HarnessConfig {
   orgTrigger?: OrgTriggerConfig;
   /** One-time guard for the main-process triggers migration; read-only here. */
   triggersMigratedV1?: boolean;
+  /** Seat hub (MultiCA-style coordination). Mirrors src/main/config.ts. */
+  seatHubUrl?: string;
+  seatHubToken?: string;
+  seatHubListen?: boolean;
+  seatHubPort?: number;
+  seatHubBind?: string;
 }
 
 /** The Sonnet model with the 1M-token context window — used for Michael's prep

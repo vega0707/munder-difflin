@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useStore } from '@/store/store';
 import { projectTabLabel, canDeleteProject } from '@shared/projectTypes';
@@ -6,6 +7,7 @@ export interface ProjectTabBarProps {
   onCreate: () => void;
   onActivate: (projectId: string) => void;
   onRequestDelete: (projectId: string) => void;
+  onJoinFloor?: (projectId: string) => Promise<boolean>;
   error?: string;
 }
 
@@ -23,10 +25,20 @@ const tabStyle = (active: boolean, degraded: boolean): CSSProperties => ({
     : 'inset 0 0 0 1px var(--cth-ink-300)'
 });
 
-export function ProjectTabBar({ onCreate, onActivate, onRequestDelete, error }: ProjectTabBarProps) {
+export function ProjectTabBar({ onCreate, onActivate, onRequestDelete, onJoinFloor, error }: ProjectTabBarProps) {
   const projects = useStore((s) => s.projects);
   const activeProjectId = useStore((s) => s.activeProjectId);
   const canDelete = canDeleteProject(projects);
+  const known = new Set(projects.map((p) => p.projectId));
+  const [joinOpen, setJoinOpen] = useState(false);
+  const [floors, setFloors] = useState<Array<{ projectId: string; name: string; agents: unknown[] }>>([]);
+
+  useEffect(() => {
+    if (!joinOpen) return;
+    void window.cth.seatListFloors?.().then((list) => {
+      setFloors((list ?? []).filter((f) => !known.has(f.projectId)));
+    }).catch(() => setFloors([]));
+  }, [joinOpen, projects.length]);
 
   return (
     <div
@@ -85,6 +97,57 @@ export function ProjectTabBar({ onCreate, onActivate, onRequestDelete, error }: 
       >
         +
       </button>
+      {onJoinFloor && (
+        <div style={{ position: 'relative', flexShrink: 0 }}>
+          <button
+            type="button"
+            className="cth-tip"
+            onClick={() => setJoinOpen((v) => !v)}
+            data-tip="Join a floor from the seat hub"
+            aria-label="Join floor from hub"
+            style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              height: 28, padding: '0 8px', flexShrink: 0,
+              background: 'var(--cth-paper-100)',
+              boxShadow: 'inset 0 0 0 1px var(--cth-ink-300)',
+              border: 'none', borderRadius: 2, cursor: 'pointer',
+              color: 'var(--cth-ink-900)', fontSize: 11
+            }}
+          >
+            join
+          </button>
+          {joinOpen && (
+            <div style={{
+              position: 'absolute', top: 32, left: 0, zIndex: 40, minWidth: 220,
+              background: 'var(--cth-paper-100)',
+              boxShadow: 'inset 0 0 0 1px var(--cth-ink-300)',
+              padding: 6
+            }}>
+              {floors.length === 0 ? (
+                <div style={{ fontSize: 11, color: 'var(--cth-ink-500)', padding: 6 }}>
+                  No other hub floors. Serve a hub in Settings → Connections, or paste a hub URL.
+                </div>
+              ) : floors.map((f) => (
+                <button
+                  key={f.projectId}
+                  type="button"
+                  onClick={() => {
+                    setJoinOpen(false);
+                    void onJoinFloor(f.projectId);
+                  }}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left',
+                    border: 'none', background: 'transparent', cursor: 'pointer',
+                    padding: '6px 8px', fontSize: 12, color: 'var(--cth-ink-900)'
+                  }}
+                >
+                  {f.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       {error && (
         <span style={{ fontSize: 11, color: 'var(--cth-coral-700)', whiteSpace: 'nowrap' }}>{error}</span>
       )}

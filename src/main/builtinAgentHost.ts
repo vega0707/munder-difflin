@@ -12,7 +12,7 @@ export class BuiltinAgentHost {
 
   constructor(private opts: {
     listHives: () => HiveManager[];
-    occupancy: (projectId: string, agentId: string) => SeatOccupancy;
+    occupancy: (projectId: string, agentId: string) => SeatOccupancy | Promise<SeatOccupancy>;
     intervalMs?: number;
   }) {}
 
@@ -38,7 +38,8 @@ export class BuiltinAgentHost {
         try { reg = hive.registry(); } catch { continue; }
         for (const [id, agent] of Object.entries(reg.agents)) {
           if (agent.provider !== 'builtin' || agent.archived) continue;
-          if (this.opts.occupancy(hive.projectId, id) === 'remote') continue;
+          const occ = await this.opts.occupancy(hive.projectId, id);
+          if (occ === 'remote') continue;
           const mail = hive.inbox(id);
           for (const msg of mail) {
             const reply = draftBuiltinReply(msg, { id, name: agent.name });

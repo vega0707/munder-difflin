@@ -193,7 +193,7 @@ export function App() {
     setClosing(null);
   };
 
-  const { switchError, activate, remove } = useProjects({
+  const { switchError, activate, remove, joinFloor } = useProjects({
     ready: !!config?.onboardingComplete && !!config?.harnessHome,
     onNeedCreate: () => setProjectCreateOpen(true)
   });
@@ -321,6 +321,7 @@ export function App() {
           onCreate={() => setProjectCreateOpen(true)}
           onActivate={(id) => { void activate(id); }}
           onRequestDelete={(id) => setProjectDeleteId(id)}
+          onJoinFloor={(id) => joinFloor(id)}
           error={switchError}
         />
         <span style={{

@@ -1662,6 +1662,35 @@ export class HiveManager {
     return true;
   }
 
+  /**
+   * Write a takeover pack onto disk. Identity/memory/inbox only — no secrets,
+   * no working tree. Does not emit live PTY events; the next spawn drains inbox.
+   */
+  applyHandoffPack(agentId: string, pack: {
+    identity?: string;
+    memory?: string;
+    inbox?: unknown;
+  }): void {
+    const dir = this.agentDir(agentId);
+    mkdirSync(join(dir, 'inbox', '.done'), { recursive: true });
+    mkdirSync(join(dir, 'outbox', '.sent'), { recursive: true });
+    if (typeof pack.identity === 'string' && pack.identity.trim()) {
+      writeFileSync(join(dir, 'identity.md'), pack.identity, 'utf8');
+    }
+    if (typeof pack.memory === 'string' && pack.memory.trim()) {
+      writeFileSync(join(dir, 'memory.md'), pack.memory, 'utf8');
+    }
+    if (!Array.isArray(pack.inbox)) return;
+    for (const raw of pack.inbox) {
+      if (!raw || typeof raw !== 'object') continue;
+      const msg = raw as { id?: unknown };
+      if (typeof msg.id !== 'string' || !msg.id) continue;
+      const dest = join(dir, 'inbox', `${msg.id}.json`);
+      if (existsSync(dest)) continue;
+      this.atomicWriteJson(dest, raw);
+    }
+  }
+
   /** Move an inbox file into `.done/` after a built-in runner handles it. */
   archiveInbox(agentId: string, msgId: string): boolean {
     const src = join(this.agentDir(agentId), 'inbox', `${msgId}.json`);
