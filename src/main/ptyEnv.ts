@@ -5,6 +5,10 @@
  *
  * The layering rule, bottom to top:
  *   1. the inherited environment, minus the parent Claude session's identity
+ *   1.5 the user's interactive-shell exports (`shellEnv`), filling ONLY gaps the
+ *       inherited environment left — an explicit value in the inherited layer
+ *       always wins; used to surface rc-file exports (nvm/brew setup, provider
+ *       env keys) that Finder/Dock-launched apps never see
  *   2. the app's own defaults (PATH, terminal identity, locale)
  *   3. per-agent values (`opts.env`) — always win, even over the strip below
  */
@@ -47,7 +51,8 @@ export function buildPtyEnv(
   parentEnv: NodeJS.ProcessEnv,
   userPath: string,
   agentEnv?: Record<string, string>,
-  platform: NodeJS.Platform = process.platform
+  platform: NodeJS.Platform = process.platform,
+  shellEnv?: Record<string, string>
 ): Record<string, string> {
   // Layer 1 — inherit, minus the parent session's Claude identity. Only this
   // layer is stripped: a marker set deliberately via `agentEnv` below survives,
@@ -56,6 +61,16 @@ export function buildPtyEnv(
   const inherited: Record<string, string> = {};
   for (const [k, v] of Object.entries(parentEnv)) {
     if (v === undefined) continue;
+    if (CLAUDE_MARKER_RE.test(k) && !CLAUDE_CONFIG_KEEP.has(k)) continue;
+    inherited[k] = v;
+  }
+  // Layer 1.5 — the user's interactive-shell exports, filling only gaps. A value
+  // already present in the inherited layer is the user's own choice about how
+  // the app was launched and must not be overridden by rc files. Identity
+  // markers are stripped here too for the same reason as Layer 1 — rc files are
+  // not supposed to carry them, and if one does it is stale.
+  for (const [k, v] of Object.entries(shellEnv ?? {})) {
+    if (v === undefined || k in inherited) continue;
     if (CLAUDE_MARKER_RE.test(k) && !CLAUDE_CONFIG_KEEP.has(k)) continue;
     inherited[k] = v;
   }

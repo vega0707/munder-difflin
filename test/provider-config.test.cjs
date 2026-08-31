@@ -80,6 +80,25 @@ test('provider commands use matching models and equivalent bypass modes', () => 
   );
 });
 
+test("claude's 'auto' sentinel emits no --model flag; other providers' auto is real", () => {
+  // 'auto' for claude means "let the CLI follow its own config" (gateway
+  // ANTHROPIC_MODEL=auto) — emitting `--model auto` would both pin the model and
+  // print an unrecognized_model warning. Gemini/copilot/cursor accept 'auto' as a
+  // genuine model id and must keep the flag.
+  assert.equal(
+    buildSpawnCommand(autoConfig, 'auto', 'claude'),
+    'claude --permission-mode bypassPermissions'
+  );
+  assert.equal(
+    buildSpawnCommand({ defaultCommand: 'claude', autoMode: false }, 'auto', 'claude'),
+    'claude'
+  );
+  assert.equal(
+    buildSpawnCommand(autoConfig, 'auto', 'gemini'),
+    'gemini --model auto --approval-mode=yolo'
+  );
+});
+
 test('model picker options stay provider-specific', () => {
   assert.equal(
     modelsForProvider('claude').find((model) => model.id === 'claude-opus-5')?.label,

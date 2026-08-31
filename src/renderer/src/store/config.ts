@@ -347,7 +347,12 @@ export function buildSpawnCommand(
         ? config.defaultCommand || ''
         : preset.defaultCommand;
   let cmd = base;
-  if (preset.supportsModel && model && preset.modelFlag) {
+  // Claude's 'auto' catalog entry is a sentinel meaning "no --model flag at all —
+  // let the CLI follow its own config" (e.g. ANTHROPIC_MODEL=auto via a gateway).
+  // Other providers (gemini, copilot, cursor) treat 'auto' as a real model id, so
+  // the skip is claude-specific. The main-process spawn fallback mirrors this
+  // same rule (src/main/index.ts) so a main-only spawn cannot re-pin the model.
+  if (preset.supportsModel && model && preset.modelFlag && !(provider === 'claude' && model === 'auto')) {
     // Quote model values that contain whitespace (agy labels like
     // "Gemini 3.1 Pro (High)") so the command tokenizer keeps them one arg.
     const m = /\s/.test(model) ? `"${model}"` : model;

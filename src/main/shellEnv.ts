@@ -70,6 +70,49 @@ export function userShellPath(): string {
   return cachedPath;
 }
 
+/** Parse `export -p` output (`export KEY=value` / `export KEY='value'`) into a
+ *  plain map. Pure so the shell capture and the parsing are each testable. */
+export function parseExportLines(text: string): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const line of text.split('\n')) {
+    const m = line.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+    if (!m) continue;
+    const [, key, raw] = m;
+    let val = raw;
+    const first = val[0];
+    const last = val[val.length - 1];
+    if (first === last && (first === '"' || first === "'")) {
+      val = val.slice(1, -1);
+    }
+    if (val === '') continue;
+    env[key] = val;
+  }
+  return env;
+}
+
+let cachedEnv: Record<string, string> | null = null;
+
+/** The user's interactive-shell exported variables (rc files: ~/.zshrc exports,
+ *  nvm/brew setup, provider keys…), captured once and cached for the session.
+ *  Same rationale as `userShellPath`: Electron on macOS starts with only the
+ *  launching process's environment, which is missing everything the user
+ *  configured in their shell — including env_key providers (codex's
+ *  `env_key = "ADA_API_KEY"`, etc.) that read their key from an exported
+ *  variable. Windows inherits the launching env directly and needs no capture. */
+export function userShellEnv(): Record<string, string> {
+  if (cachedEnv !== null) return cachedEnv;
+  if (process.platform === 'win32') {
+    cachedEnv = {};
+    return cachedEnv;
+  }
+  const out = captureFromLoginShell('export -p');
+  cachedEnv = out ? parseExportLines(out) : {};
+  return cachedEnv;
+}
+
+/** Force re-capture (e.g. after the user edits ~/.zshrc mid-session). */
+export function resetUserShellEnv(): void { cachedEnv = null; }
+
 /** Resolve a bare command (e.g. 'claude') against the user's PATH + common
  *  install locations. Returns the input unchanged if it already looks like a path. */
 /** A plain executable name — the only shape we resolve against the user's PATH.

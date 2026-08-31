@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { ensureKilled, hardKillTree } from './procKill';
 import { expandTilde } from './fs';
 import { buildPtyEnv } from './ptyEnv';
-import { captureFromLoginShell, isSafeCommandName, userShellPath } from './shellEnv';
+import { captureFromLoginShell, isSafeCommandName, userShellEnv, userShellPath } from './shellEnv';
 
 /** APPEND the hive's bundled-node dir (`<HIVE_ROOT>/bin/runtime`, which holds a
  *  shim literally named `node`) to a child's PATH.
@@ -649,7 +649,9 @@ export class PtyManager {
         // Inherited env minus the parent Claude session's identity markers,
         // then the app's defaults and locale, then per-agent values — see
         // ptyEnv.ts for why the strip exists and why it is prefix-based.
-        env: buildPtyEnv(process.env, userPath, opts.env)
+        // userShellEnv() fills rc-file exports (provider env keys, brew/nvm
+        // setup) that a Finder/Dock-launched app never inherited.
+        env: buildPtyEnv(process.env, userPath, opts.env, process.platform, userShellEnv())
       });
 
       // Capture THIS session object so the proc's callbacks can tell whether the

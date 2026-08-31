@@ -2752,7 +2752,10 @@ async function spawnAgentCore(opts: AgentSpawnOptions, owner: Electron.WebConten
       const m = opts.hive.isGod
         ? modelForRole(opts.hive, cfg)
         : cfg.defaultModel ?? modelForRole(opts.hive, cfg);
-      if (m) args.push('--model', m);
+      // 'auto' is the renderer's sentinel for "no --model — the CLI's own config
+      // decides" (ANTHROPIC_MODEL=auto gateways). Re-pinning it here would defeat
+      // the user's explicit choice; buildSpawnCommand skips it for the same reason.
+      if (m && m !== 'auto') args.push('--model', m);
     }
     // Name the Remote Control session after the agent (Michael, Jim, Dev1…) so it
     // is identifiable in claude.ai / the mobile app. Otherwise Claude defaults the

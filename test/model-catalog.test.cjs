@@ -19,6 +19,7 @@ const {
  *  literals are the only record of what shipped before the move. */
 const SHIPPED = {
   claude: [
+    ["auto", "Auto (CLI default)"],
     ["claude-fable-5", "Fable 5"],
     ["claude-opus-5", "Opus 5 · 1M"],
     ["claude-opus-4-8", "Opus 4.8"],

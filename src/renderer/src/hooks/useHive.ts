@@ -81,6 +81,19 @@ const INITIAL_GOD_PROMPT = [
   'Then begin orchestrating: triage requests, delegate work to the team, and keep everyone unblocked. You are fully autonomous — there is no approval queue, so handle tool-permission prompts in this session yourself (the human can approve them remotely from their phone).'
 ].join('\n');
 
+// A RESUMED god keeps its full context and must NOT be re-oriented (that would
+// reset the floor's situational awareness), but it still needs a mailbox kick:
+// a resumed session skips INITIAL_GOD_PROMPT, and if hook events are missing
+// (broken hook chain) the inbox-wake nudge never fires — so mail piles up
+// unread across restarts. This is the narrow version: drain + re-sync, no
+// re-orientation.
+const RESUMED_GOD_KICK = [
+  "You're back online as the orchestrator of the hive.",
+  '1. Drain every message in your inbox; move handled ones to inbox/.done/.',
+  '2. Review board.md + tasks.json and the fleet; re-engage anyone stalled or blocked.',
+  'Then continue orchestrating — there may be pending work from before this restart.'
+].join('\n');
+
 // Per-pty submission chain. Every submitToPty for a given pty is appended here so
 // two callers (e.g. the boot sequence's /remote-control and the inbox-wake nudge)
 // can NEVER interleave their text + Enter — which jammed them onto one line and
@@ -140,6 +153,14 @@ function submitToPty(
     // commands) is sent raw — some TUIs (Antigravity's agy) treat the paste
     // markers as literal input and never submit, so skipping them is more robust.
     const payload = text.includes('\n') ? `\x1b[200~${text}\x1b[201~` : text;
+    // Claude Code 2.1.x renders the agent's remote-control session name as its
+    // TUI prompt, and a prior failed "/remote-control <name>" can leave "<name>"
+    // sitting in the input buffer. The skill router then glues that residue onto
+    // the next injected text and swallows it ("Args from unknown skill:
+    // BossYou have new hive inbox…"), so the god never sees its mail. Clear the
+    // current input line (Ctrl+U) before writing, so nothing stale can glue onto
+    // the payload. Best-effort: a TUI that is not in line-edit mode ignores it.
+    await window.cth.writePty(ptyId, '\x15').catch(() => {});
     // writePty NEVER rejects for a dead pty — it resolves { ok:false, error:
     // 'no pty: …' } — so an unchecked await here made every failed delivery look
     // successful (the queue-drain then destroyed the message it had already
@@ -460,12 +481,14 @@ export function useHive(config: HarnessConfig | null): void {
             // orientation prompt (fresh spawns only) is submitted next.
             await submitToPty(GOD_PTY, remoteCommand, godProvider, REMOTE_CONTROL_SETTLE_MS);
           }
-          if (!cancelled && !resumedGod) {
+          if (!cancelled) {
             // A type-into-tui god (Crush) can't ride its hive protocol on argv, so the
             // main process hands it back as seedPrompt — type it FIRST (identity), then
             // the orientation kick. Serialized via writeChains so they can't jam. (ondev-b)
             if (res.seedPrompt) await submitToPty(GOD_PTY, res.seedPrompt, godProvider);
-            await submitToPty(GOD_PTY, INITIAL_GOD_PROMPT, godProvider);
+            // Fresh spawns get the full orientation; a RESUMED god gets only the
+            // mailbox/board kick — see RESUMED_GOD_KICK for why it must still fire.
+            await submitToPty(GOD_PTY, resumedGod ? RESUMED_GOD_KICK : INITIAL_GOD_PROMPT, godProvider);
           }
         } catch { /* PTY may have died during startup */ }
         finally { bootGraceUntil.current[GOD_ID] = 0; }

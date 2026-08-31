@@ -15,6 +15,7 @@ const assert = require('node:assert/strict');
 const loadTs = require('./load-ts.cjs');
 
 const { buildPtyEnv } = loadTs('src/main/ptyEnv.ts');
+const { parseExportLines } = loadTs('src/main/shellEnv.ts');
 
 /** The twelve markers dumped from a live Claude Code session in review of the
  *  fix — the original hardcoded list caught only the first five. */
@@ -108,4 +109,59 @@ test('locale: UTF-8 defaults on darwin, the user\'s exported locale wins, win32 
   const win = buildPtyEnv({}, 'C:\\bin', undefined, 'win32');
   assert.ok(!('LANG' in win));
   assert.ok(!('LC_CTYPE' in win));
+});
+
+test('parseExportLines reads export -p output: bare, quoted, and rc chatter', () => {
+  assert.deepEqual(
+    parseExportLines([
+      'export ADA_API_KEY=ada_secret',
+      'export LANG=\'en_US.UTF-8\'',
+      'export BREW_PREFIX="/opt/homebrew"',
+      'export EMPTY=\'\'',
+      'Restored session: <date>',       // rc-file chatter — no assignment, skipped
+      'PATH=/stale/should/not/appear'   // no `export` keyword is still a bare form
+    ].join('\n')),
+    {
+      ADA_API_KEY: 'ada_secret',
+      LANG: 'en_US.UTF-8',
+      BREW_PREFIX: '/opt/homebrew',
+      PATH: '/stale/should/not/appear'
+    }
+  );
+});
+
+test('shell exports fill ONLY gaps the inherited env left, and stay stripped', () => {
+  // ADA_API_KEY lives in the user's rc file but not in the launching env — the
+  // exact case that broke codex's env_key provider when the app was launched
+  // from Finder (or a terminal that lacks it).
+  const filled = buildPtyEnv(
+    { HOME: '/Users/x' },
+    '/bin',
+    undefined,
+    'darwin',
+    { ADA_API_KEY: 'ada_secret', BREW_PREFIX: '/opt/homebrew', CLAUDE_CODE_SESSION_ID: 'stale' }
+  );
+  assert.equal(filled.ADA_API_KEY, 'ada_secret');
+  assert.equal(filled.BREW_PREFIX, '/opt/homebrew');
+  assert.ok(!('CLAUDE_CODE_SESSION_ID' in filled), 'rc-file identity markers are stripped too');
+
+  // An explicit value in the inherited layer wins over the rc file.
+  const explicitWins = buildPtyEnv(
+    { HOME: '/Users/x', ADA_API_KEY: 'launching-env-key' },
+    '/bin',
+    undefined,
+    'darwin',
+    { ADA_API_KEY: 'rc-file-key' }
+  );
+  assert.equal(explicitWins.ADA_API_KEY, 'launching-env-key');
+
+  // Agent env still outranks everything, including a filled gap.
+  const agentWins = buildPtyEnv(
+    {},
+    '/bin',
+    { ADA_API_KEY: 'per-agent-key' },
+    'darwin',
+    { ADA_API_KEY: 'rc-file-key' }
+  );
+  assert.equal(agentWins.ADA_API_KEY, 'per-agent-key');
 });
