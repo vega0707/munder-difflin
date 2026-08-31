@@ -288,19 +288,35 @@ export function redactSecrets(text: unknown): string {
   return s;
 }
 
+function withProjectId(payload: unknown, projectId: string): unknown {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return payload;
+  if ('projectId' in payload) return payload;
+  return { ...(payload as Record<string, unknown>), projectId };
+}
+
 // ─── HiveManager ────────────────────────────────────────────────────────────
 
 export class HiveManager {
   /**
-   * @param getHome  Lazily resolve harnessHome so the hive follows config changes.
+   * @param getHome  Lazily resolve the project root so the hive follows
+   *                 `<projectRoot>/hive`. Callers used to pass harnessHome;
+   *                 ProjectRegistry now passes the per-project directory.
    * @param emit     Optional sink for renderer-facing events (set by the main
    *                 process to `webContents.send`). Used to animate routed
    *                 messages on the office floor; a no-op in tests/headless.
+   * @param projectId Stable id of the project that owns this hive.
    */
+  private emit?: (channel: string, payload: unknown) => boolean | void;
+
   constructor(
     private getHome: () => string | null,
-    private emit?: (channel: string, payload: unknown) => boolean | void
-  ) {}
+    emit?: (channel: string, payload: unknown) => boolean | void,
+    readonly projectId: string = 'default'
+  ) {
+    this.emit = emit
+      ? (channel, payload) => emit(channel, withProjectId(payload, projectId))
+      : undefined;
+  }
 
   private routerTimer: NodeJS.Timeout | null = null;
 

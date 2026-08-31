@@ -7,6 +7,8 @@ export interface HookEvent {
   source?: string;
   message?: string;
   blocked?: boolean;
+  /** Owning hive; set once more than one project can run. */
+  projectId?: string;
 }
 
 const OPTIONAL_STRING_FIELDS = ['tool', 'notificationType', 'source', 'message'] as const;
@@ -25,6 +27,11 @@ export function validateHookEvent(value: unknown): value is HookEvent {
   for (const field of OPTIONAL_STRING_FIELDS) {
     if (candidate[field] !== undefined && typeof candidate[field] !== 'string') return false;
   }
+
+  if (
+    candidate.projectId !== undefined &&
+    (typeof candidate.projectId !== 'string' || candidate.projectId.length === 0)
+  ) return false;
 
   return candidate.blocked === undefined || typeof candidate.blocked === 'boolean';
 }

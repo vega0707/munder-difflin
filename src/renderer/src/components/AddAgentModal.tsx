@@ -7,6 +7,7 @@ import { Icon } from './Icon';
 import { ProviderLogo } from './ProviderLogo';
 import { useStore, type Agent } from '@/store/store';
 import { OFFICE_CAST, DEFAULT_CHARACTER, type OfficeCharacterName } from '@/scene/office/cast';
+import { agentPtyId } from '@shared/projectTypes';
 import { type AccentColorName } from '@/design/tokens';
 import type { HireManifest } from '@shared/hire';
 import { hireQueueProgress } from '@shared/hireQueue';
@@ -397,8 +398,9 @@ export function AddAgentModal({ onClose, config, onConfigChange }: AddAgentModal
     if (!command.trim()) { setError(tr('addAgent.errCommand')); setSection('engine'); return; }
 
     setBusy(true);
+    const projectId = useStore.getState().activeProjectId ?? 'default';
     const id = uniqueId(name);
-    const ptyId = `pty-${id}`;
+    const ptyId = agentPtyId(projectId, id);
     // Split the editable command field into argv-style pieces for node-pty.
     // Quote-aware so an agy model label like "Gemini 3.1 Pro (High)" — or any
     // auto-mode flags appended to the command — stays one argument.
@@ -411,6 +413,7 @@ export function AddAgentModal({ onClose, config, onConfigChange }: AddAgentModal
       args,
       cols: 100,
       rows: 30,
+      projectId,
       // When set, the main process spawns this agent in its own git worktree.
       // Forced OFF when resuming a session — `--resume` needs the real cwd's
       // transcript, not a fresh worktree with a different (empty) project dir.

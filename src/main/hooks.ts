@@ -152,7 +152,8 @@ export class HookServer {
         this.getWebContents()?.send('hive:contextUpdate', {
           agentId,
           tokens: cw.total_input_tokens,
-          limit: cw.context_window_size
+          limit: cw.context_window_size,
+          projectId: this.hive.projectId
         });
       }
       return {};
@@ -334,12 +335,64 @@ export class HookServer {
       notificationType: p.notification_type,
       source: p.source,
       message: p.message,
-      blocked
+      blocked,
+      projectId: this.hive.projectId
     };
     if (!validateHookEvent(payload)) {
       console.warn('[hive] rejected invalid hook event:', event);
       return;
     }
     this.getWebContents()?.send('hive:hookEvent', payload);
+  }
+}
+
+/**
+ * One HookServer per hive. Each hive has its own hooks.sock, so two projects
+ * can both have agent id `god` without the shim colliding.
+ */
+export class HookHub {
+  private servers = new Map<string, HookServer>();
+
+  constructor(private readonly make: (hive: HiveManager) => HookServer) {}
+
+  ensure(hive: HiveManager): HookServer {
+    const existing = this.servers.get(hive.projectId);
+    if (existing) return existing;
+    const server = this.make(hive);
+    server.start();
+    this.servers.set(hive.projectId, server);
+    return server;
+  }
+
+  stop(projectId: string): void {
+    const server = this.servers.get(projectId);
+    if (!server) return;
+    server.stop();
+    this.servers.delete(projectId);
+  }
+
+  stopAll(): void {
+    for (const id of [...this.servers.keys()]) this.stop(id);
+  }
+
+  transcriptPath(agentId: string, projectId?: string | null): string | undefined {
+    if (projectId) return this.servers.get(projectId)?.transcriptPath(agentId);
+    for (const server of this.servers.values()) {
+      const path = server.transcriptPath(agentId);
+      if (path) return path;
+    }
+    return undefined;
+  }
+
+  contextFor(
+    agentId: string,
+    projectId?: string | null
+  ): { tokens: number; limit: number; ts: number } | undefined {
+    if (projectId) return this.servers.get(projectId)?.contextFor(agentId);
+    for (const server of this.servers.values()) {
+      const ctx = server.contextFor(agentId);
+      if (ctx) return ctx;
+    }
+    return undefined;
   }
 }

@@ -1,0 +1,191 @@
+import { useState, type CSSProperties } from 'react';
+import { PixelPanel } from './PixelPanel';
+import { PixelButton } from './PixelButton';
+import { SpritePortrait } from './SpritePortrait';
+import { OFFICE_CAST } from '@/scene/office/cast';
+import {
+  assignCreateProjectGod,
+  canSubmitCreateProject,
+  toggleCreateRole,
+  type CreateProjectRole,
+  type OfficeCharacterName
+} from '@shared/projectTypes';
+import { useStore } from '@/store/store';
+
+export interface ProjectCreateDialogProps {
+  onClose: () => void;
+  onCreated?: (projectId: string) => void;
+}
+
+const inputStyle: CSSProperties = {
+  width: '100%',
+  boxSizing: 'border-box',
+  padding: '6px 8px',
+  fontFamily: 'var(--cth-font-ui)',
+  fontSize: 13,
+  color: 'var(--cth-ink-900)',
+  background: 'var(--cth-cream-50)',
+  border: 'none',
+  boxShadow: 'inset 0 0 0 1px var(--cth-ink-200)'
+};
+
+export function ProjectCreateDialog({ onClose, onCreated }: ProjectCreateDialogProps) {
+  const [name, setName] = useState('');
+  const [cwd, setCwd] = useState('');
+  const [roles, setRoles] = useState<CreateProjectRole[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>();
+
+  const ready = name.trim().length > 0 && canSubmitCreateProject(roles);
+  const god = roles.find((r) => r.asGod);
+
+  const pick = (character: OfficeCharacterName) => {
+    setRoles((prev) => toggleCreateRole(prev, character));
+    setError(undefined);
+  };
+
+  const makeGod = (character: OfficeCharacterName) => {
+    setRoles((prev) => assignCreateProjectGod(prev, character));
+  };
+
+  const browse = async () => {
+    const res = await window.cth.chooseFolder();
+    if (res.ok) setCwd(res.path);
+  };
+
+  const submit = async () => {
+    if (!ready || busy) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      const res = await window.cth.projectCreate({
+        name: name.trim(),
+        defaultCwd: cwd.trim() || undefined,
+        roles
+      });
+      if (!res.ok) {
+        setError(res.code === 'GOD_REQUIRED'
+          ? 'Pick at least one character to be the god.'
+          : (res.error || 'Could not create the project.'));
+        setBusy(false);
+        return;
+      }
+        onCreated?.(res.project.projectId);
+        useStore.getState().setActiveProjectId(res.project.projectId);
+        if ('roster' in res) useStore.getState().loadFloorFromRoster(res.roster);
+        onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 80,
+      background: 'rgba(26, 25, 30, 0.45)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 24
+    }}>
+      <div style={{ width: 560, maxWidth: '94vw', maxHeight: '90vh', overflow: 'auto' }}>
+        <PixelPanel variant="dialog" title="NEW PROJECT" noPadding>
+          <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <p style={{ margin: 0, fontSize: 13, lineHeight: '20px', color: 'var(--cth-ink-700)' }}>
+              A project is its own floor. You have to pick at least one character
+              as the <strong>god</strong> — that person runs the floor. Extra
+              characters join as workers.
+            </p>
+
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
+              Project name
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Acme checkout"
+                style={inputStyle}
+              />
+            </label>
+
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
+              Default folder (optional)
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder="~/src/acme" style={inputStyle} />
+                <PixelButton size="sm" onClick={() => void browse()}>Browse</PixelButton>
+              </div>
+            </label>
+
+            <div>
+              <div style={{ fontSize: 12, marginBottom: 6 }}>
+                Who is on the floor? Mark one as god.
+                {god ? ` God: ${OFFICE_CAST.find((c) => c.name === god.character)?.displayName}.` : ' Nobody is god yet.'}
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {OFFICE_CAST.map((c) => {
+                  const selected = roles.find((r) => r.character === c.name);
+                  const isGod = !!selected?.asGod;
+                  return (
+                    <div key={c.name} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                      <button
+                        onClick={() => pick(c.name)}
+                        title={c.blurb}
+                        style={{
+                          padding: 4,
+                          background: isGod
+                            ? 'var(--cth-lemon-light)'
+                            : selected
+                              ? 'var(--cth-mint-light)'
+                              : 'var(--cth-cream-100)',
+                          boxShadow: isGod
+                            ? 'inset 0 0 0 2px var(--cth-ink-900)'
+                            : selected
+                              ? 'inset 0 0 0 1.5px var(--cth-ink-500)'
+                              : 'inset 0 0 0 1px var(--cth-ink-100)',
+                          cursor: 'pointer',
+                          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+                          border: 'none', width: 56
+                        }}
+                      >
+                        <div style={{
+                          width: 44, height: 56, display: 'flex',
+                          alignItems: 'flex-end', justifyContent: 'center', overflow: 'hidden'
+                        }}>
+                          <SpritePortrait character={c.name} scale={2} />
+                        </div>
+                        <span style={{ fontSize: 11, color: 'var(--cth-ink-700)' }}>{c.displayName}</span>
+                      </button>
+                      {selected && !isGod && (
+                        <button
+                          onClick={() => makeGod(c.name)}
+                          style={{
+                            border: 'none', background: 'transparent', cursor: 'pointer',
+                            fontSize: 10, color: 'var(--cth-ink-500)', padding: 0
+                          }}
+                        >
+                          make god
+                        </button>
+                      )}
+                      {isGod && (
+                        <span style={{ fontSize: 10, color: 'var(--cth-ink-900)' }}>god</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {error && (
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--cth-coral-700)' }}>{error}</p>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <PixelButton onClick={onClose} disabled={busy}>Cancel</PixelButton>
+              <PixelButton variant="primary" onClick={() => void submit()} disabled={!ready || busy}>
+                {busy ? 'Creating…' : 'Create project'}
+              </PixelButton>
+            </div>
+          </div>
+        </PixelPanel>
+      </div>
+    </div>
+  );
+}

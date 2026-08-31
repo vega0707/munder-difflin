@@ -506,7 +506,8 @@ function FloorTab({ seed }: { seed: { text: string; seq: number } }) {
         hive,
         resume,
         resumeSessionId,
-        requireResume: resume
+        requireResume: resume,
+        projectId: useStore.getState().activeProjectId ?? undefined
       });
       if (!res.ok) throw new Error(res.error ?? 'Restart failed.');
       if (resume && res.resumed !== true) {

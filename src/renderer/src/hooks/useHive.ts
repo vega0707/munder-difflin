@@ -23,13 +23,17 @@ import { resolveGodName } from '../../../shared/godIdentity';
 import { acquireTerminal, resetTerminal, isTerminalAutomationSafe } from '@/components/terminalPool';
 import { canDeliverToAgent, deliverWithAcknowledgement, checkPrecondition } from './queueDelivery';
 import { OFFICE_CAST, DEFAULT_CHARACTER } from '@/scene/office/cast';
+import { agentPtyId, type OfficeCharacterName } from '@shared/projectTypes';
 
 const GOD_ID = 'god';
 /** Accent palette for MAIN-spawned (voice-hired) agents — picked deterministically
  *  from the agent id so the same agent always gets the same colour. Mirrors the
  *  AddAgentModal palette. */
 const SPAWN_ACCENTS = ['coral', 'mint', 'sky', 'lemon', 'lilac', 'peach'] as const;
-const GOD_PTY = `pty-${GOD_ID}`;
+
+function godPtyIdFor(projectId: string): string {
+  return agentPtyId(projectId, GOD_ID);
+}
 
 const REMOTE_CONTROL_SETTLE_MS = 1500;
 // Provider-agnostic PTY-quiescence idle fallback (#2e). A non-Claude bridge that
@@ -72,14 +76,16 @@ function withStandingGoal(agent: Agent, text: string): string {
 
 // The first thing Michael (god) is told on a fresh spawn — orient him and put
 // him to work running the floor. Kept terse and action-oriented.
-const INITIAL_GOD_PROMPT = [
-  "You're online as Michael, the orchestrator of the hive. Get oriented, then start running the floor:",
-  '1. Read your memory.md and drain every message in your inbox.',
-  '2. Review board.md + tasks.json and the current roster of agents (active vs archived).',
-  '3. Check fleet health: read fleet.json in the hive root for every agent\'s live tokens, cost, status, breaker level, and inbox backlog (`claude agents` will NOT show your hive\'s agents). Flag anyone stalled, over-budget, or breaker-armed.',
-  '4. Skim COMMANDS.md (hive root) for the Claude Code commands you can use — and run `mempalace wake-up` for a memory digest if the CLI is available.',
-  'Then begin orchestrating: triage requests, delegate work to the team, and keep everyone unblocked. You are fully autonomous — there is no approval queue, so handle tool-permission prompts in this session yourself (the human can approve them remotely from their phone).'
-].join('\n');
+function initialGodPrompt(godName: string): string {
+  return [
+    `You're online as ${godName}, the orchestrator of the hive. Get oriented, then start running the floor:`,
+    '1. Read your memory.md and drain every message in your inbox.',
+    '2. Review board.md + tasks.json and the current roster of agents (active vs archived).',
+    '3. Check fleet health: read fleet.json in the hive root for every agent\'s live tokens, cost, status, breaker level, and inbox backlog (`claude agents` will NOT show your hive\'s agents). Flag anyone stalled, over-budget, or breaker-armed.',
+    '4. Skim COMMANDS.md (hive root) for the Claude Code commands you can use — and run `mempalace wake-up` for a memory digest if the CLI is available.',
+    'Then begin orchestrating: triage requests, delegate work to the team, and keep everyone unblocked. You are fully autonomous — there is no approval queue, so handle tool-permission prompts in this session yourself (the human can approve them remotely from their phone).'
+  ].join('\n');
+}
 
 // A RESUMED god keeps its full context and must NOT be re-oriented (that would
 // reset the floor's situational awareness), but it still needs a mailbox kick:
@@ -394,27 +400,29 @@ export function useHive(config: HarnessConfig | null): void {
   }, [config?.onboardingComplete]);
 
   // 1) Bootstrap the god agent (source of truth = live PTYs, to dodge restarts).
+  const activeProjectId = useStore((s) => s.activeProjectId);
   useEffect(() => {
-    if (!config?.onboardingComplete || !config.harnessHome) return;
+    if (!config?.onboardingComplete || !config.harnessHome || !activeProjectId) return;
+    const project = useStore.getState().projects.find((p) => p.projectId === activeProjectId);
+    if (!project || project.status === 'degraded') return;
     let cancelled = false;
+    godSpawning.current = false;
     useStore.getState().setGodStatus('booting');
+    const godPty = godPtyIdFor(activeProjectId);
+    const godCwd = project.defaultCwd?.trim() || project.hiveRootPath.replace(/[/\\]hive[/\\]?$/, '') || config.harnessHome;
+    const godCharacter = (project.godCharacter || 'michael') as OfficeCharacterName;
     const t = setTimeout(async () => {
       if (cancelled) return;
       const live = await window.cth.listPtys().catch(() => []);
-      if (live.some((p) => p.id === GOD_PTY)) { // already running — keep restored entry
+      if (live.some((p) => p.id === godPty || (p.projectId === activeProjectId && p.id.endsWith('god')))) {
         if (!cancelled) useStore.getState().setGodStatus('ready');
         return;
       }
-      // Synchronous guard (no await between check and set) → exactly one spawn.
       if (cancelled || godSpawning.current) return;
       godSpawning.current = true;
-      useStore.getState().removeAgent(GOD_ID); // clear any stale restored entry
+      useStore.getState().removeAgent(GOD_ID);
 
-      // A prior rename (Edit Agent panel → renameAgent() → hive.ts's renameAgent())
-      // persists straight into registry.json, so read it back here rather than
-      // hardcoding DEFAULT_GOD_NAME below — otherwise a custom name reverts on
-      // every respawn even though the registry still has it right.
-      const reg = await window.cth.hiveRegistry().catch(() => null);
+      const reg = await window.cth.hiveRegistry(activeProjectId).catch(() => null);
       const godName = resolveGodName(reg?.agents?.[GOD_ID]?.name);
 
       const godProvider = config.godProvider ?? 'claude';
@@ -422,37 +430,33 @@ export function useHive(config: HarnessConfig | null): void {
       const command = buildSpawnCommand(config, godModel, godProvider);
       const [exe, ...args] = tokenizeCommand(command.trim());
       const res = await window.cth.spawnPty({
-        id: GOD_PTY,
-        cwd: config.harnessHome!,
+        id: godPty,
+        cwd: godCwd,
         command: exe,
         provider: godProvider,
         args,
         cols: 100,
         rows: 30,
-        // Restore Michael's prior conversation across an app restart. His session
-        // id lives in the hive registry (recorded from his hooks), so the main
-        // process attaches `--resume <id>`; a missing transcript falls back to a
-        // fresh session. Without this the most important context on the floor —
-        // the orchestrator's — was lost on every restart.
+        projectId: activeProjectId,
         resume: true,
-        hive: { id: GOD_ID, name: godName, provider: godProvider, cwd: config.harnessHome!, isGod: true, role: 'orchestrator (god)' }
+        hive: { id: GOD_ID, name: godName, provider: godProvider, cwd: godCwd, isGod: true, role: 'orchestrator (god)' }
       });
       if (cancelled) { godSpawning.current = false; return; }
       if (!res.ok) { godSpawning.current = false; useStore.getState().setGodStatus('failed'); return; }
       const god: Agent = {
         id: GOD_ID,
         name: godName,
-        character: 'michael',
+        character: godCharacter,
         accent: 'lemon',
         description: 'god — runs the floor, triages requests, escalates only critical calls to you',
         project: 'hive',
         tmuxTarget: '',
-        cwd: config.harnessHome!,
+        cwd: res.cwd ?? godCwd,
         status: 'idle',
         action: 'running the floor',
         progress: 0,
         currentStation: 'desk',
-        ptyId: GOD_PTY,
+        ptyId: godPty,
         command: command.trim(),
         provider: godProvider,
         model: godModel,
@@ -462,45 +466,31 @@ export function useHive(config: HarnessConfig | null): void {
       useStore.getState().addAgent(god);
       useStore.getState().setGodStatus('ready');
 
-      // Kick Michael off once his TUI is up. Always re-enable remote control so
-      // the human can approve permission prompts from their phone (best-effort — a
-      // failed/unknown slash command just prints to his terminal and is harmless).
-      // Then, ONLY on a genuinely fresh spawn, hand him the orientation prompt —
-      // a RESUMED Michael already has his full context and must not be re-oriented
-      // mid-thread (that would reset the floor's situational awareness). Both go
-      // through the per-pty submit chain, so they're strictly sequential and can't
-      // jam together; the boot-grace window keeps the inbox-wake/drain loops off
-      // Michael until he's settled. The live-PTY branch above skips this entirely.
       const resumedGod = res.resumed === true;
       bootGraceUntil.current[GOD_ID] = Date.now() + BOOT_GRACE_MS;
       void (async () => {
         try {
           const remoteCommand = remoteControlCommandForProvider(godProvider, godName);
           if (remoteCommand) {
-            // settleMs pauses the chain ~1.5s after /remote-control before the
-            // orientation prompt (fresh spawns only) is submitted next.
-            await submitToPty(GOD_PTY, remoteCommand, godProvider, REMOTE_CONTROL_SETTLE_MS);
+            await submitToPty(godPty, remoteCommand, godProvider, REMOTE_CONTROL_SETTLE_MS);
           }
           if (!cancelled) {
-            // A type-into-tui god (Crush) can't ride its hive protocol on argv, so the
-            // main process hands it back as seedPrompt — type it FIRST (identity), then
-            // the orientation kick. Serialized via writeChains so they can't jam. (ondev-b)
-            if (res.seedPrompt) await submitToPty(GOD_PTY, res.seedPrompt, godProvider);
-            // Fresh spawns get the full orientation; a RESUMED god gets only the
-            // mailbox/board kick — see RESUMED_GOD_KICK for why it must still fire.
-            await submitToPty(GOD_PTY, resumedGod ? RESUMED_GOD_KICK : INITIAL_GOD_PROMPT, godProvider);
+            if (res.seedPrompt) await submitToPty(godPty, res.seedPrompt, godProvider);
+            await submitToPty(godPty, resumedGod ? RESUMED_GOD_KICK : initialGodPrompt(godName), godProvider);
           }
         } catch { /* PTY may have died during startup */ }
         finally { bootGraceUntil.current[GOD_ID] = 0; }
       })();
     }, 1200);
     return () => { cancelled = true; clearTimeout(t); };
-  }, [config?.onboardingComplete, config?.harnessHome]);
+  }, [config?.onboardingComplete, config?.harnessHome, activeProjectId]);
 
   // 2) Drive avatars from real hook events emitted by each agent's shim.
   useEffect(() => {
     return window.cth.onHiveHookEvent((e) => {
       if (!e.agentId) return;
+      const activeId = useStore.getState().activeProjectId;
+      if (e.projectId && activeId && e.projectId !== activeId) return;
       const { updateAgent, agents } = useStore.getState();
       const self = agents.find((a) => a.id === e.agentId);
       if (!self) return;
@@ -1248,6 +1238,7 @@ export function useHive(config: HarnessConfig | null): void {
           isolate: false,
           // Reattach the agent's prior session so no context is lost on revive.
           resume: true,
+          projectId: useStore.getState().activeProjectId ?? undefined,
           hive
         });
         if (res.ok) {

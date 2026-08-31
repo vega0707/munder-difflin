@@ -2,6 +2,7 @@ import { useEffect, useSyncExternalStore } from 'react';
 import { useStore, type Agent } from '@/store/store';
 import { buildSpawnCommand, inferAgentProvider, tokenizeCommand, type HarnessConfig } from '@/store/config';
 import { roleForHiveSpawn } from '@shared/agentRole';
+import { agentPtyId } from '@shared/projectTypes';
 
 /** "Restore team" — respawn every worker from the previous session.
  *
@@ -109,7 +110,8 @@ export function useRestoreTeam(config?: HarnessConfig | null): RestoreTeamState 
             return null;
           }
           const [exe, ...args] = tokenizeCommand(command);
-          const ptyId = a.ptyId ?? `pty-${a.id}`;
+          const projectId = useStore.getState().activeProjectId ?? 'default';
+          const ptyId = a.ptyId?.startsWith('pty:') ? a.ptyId : agentPtyId(projectId, a.id);
           // An isolated agent's worktree SURVIVES an app restart on disk (it's only
           // torn down on per-tab close / mid-session exit, not on quit). So re-enter
           // that exact worktree as the cwd rather than re-isolating — `git worktree
@@ -147,6 +149,7 @@ export function useRestoreTeam(config?: HarnessConfig | null): RestoreTeamState 
             // agent id is preserved across restart, so its registry entry,
             // memory.md and inbox reattach by id. No-op without a recorded session.
             resume: true,
+            projectId,
             hive: { id: a.id, name: a.name, provider, cwd, role: roleForHiveSpawn(a) }
           });
           if (res.ok) {

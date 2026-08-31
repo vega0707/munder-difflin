@@ -18,6 +18,7 @@ import { preferredAgentRole } from '@shared/agentRole';
 import { isInboxNudge } from '@shared/hiveNudge';
 import { refocusAfterRemoval, focusOnLoad, restoreFocus } from './focusMode';
 import { chooseRosterSource } from './rosterSource';
+import type { ProjectMeta } from '@shared/projectTypes';
 
 export type ToolKind =
   | 'Read' | 'Edit' | 'Write' | 'Bash' | 'WebFetch' | 'WebSearch'
@@ -209,6 +210,19 @@ interface State {
   sidebarWidth: number;
   sidebarTab: SidebarTab;
   godStatus: GodStatus;
+  projects: ProjectMeta[];
+  activeProjectId: string | null;
+  setProjectList: (list: ProjectMeta[]) => void;
+  setActiveProjectId: (id: string | null) => void;
+  /** Replace the visible floor with another project's roster. Does not flush
+   *  the previous floor — caller must flushRoster() first. */
+  loadFloorFromRoster: (snap: {
+    agents?: unknown[];
+    archived?: unknown[];
+    restorable?: unknown[];
+    queues?: Record<string, unknown[]>;
+    selectedId?: string | null;
+  } | null) => void;
   /** Per-agent outgoing message queue (agent id → messages awaiting delivery).
    *  Lets the user keep "talking" to a busy agent: messages park here and are
    *  drained to the terminal one-by-one once the agent is free. */
@@ -690,6 +704,41 @@ export const useStore = create<State>((set, get) => ({
   sidebarWidth: initialSidebarWidth,
   sidebarTab: initialSidebarTab,
   godStatus: 'booting',
+  projects: [],
+  activeProjectId: null,
+  setProjectList: (list) => set({ projects: list }),
+  setActiveProjectId: (id) => set({ activeProjectId: id }),
+  loadFloorFromRoster: (snap) =>
+    set(() => {
+      const agents = agentsFromRoster(snap?.agents);
+      const archivedAgents = archivedFromRoster(snap?.archived);
+      const restorableAgents = restorableFromRoster(snap?.restorable);
+      const messageQueues = queuesFromRoster(snap?.queues);
+      const selectedId = (typeof snap?.selectedId === 'string' && agents.some((a) => a.id === snap.selectedId))
+        ? snap.selectedId
+        : (agents[0]?.id ?? null);
+      rosterMirror.agents = slimAgents(agents);
+      rosterMirror.archived = slimAgents(archivedAgents);
+      rosterMirror.restorable = slimAgents(restorableAgents);
+      rosterMirror.queues = messageQueues;
+      rosterMirror.selectedId = selectedId;
+      try {
+        window.localStorage.setItem(LS_AGENTS, JSON.stringify(rosterMirror.agents));
+        window.localStorage.setItem(LS_ARCHIVED, JSON.stringify(rosterMirror.archived));
+        window.localStorage.setItem(LS_RESTORABLE, JSON.stringify(rosterMirror.restorable));
+        window.localStorage.setItem(LS_QUEUES, JSON.stringify(messageQueues));
+        window.localStorage.setItem(LS_SELECTED, selectedId ?? '');
+      } catch { /* noop */ }
+      return {
+        agents,
+        archivedAgents,
+        restorableAgents,
+        messageQueues,
+        selectedId,
+        feeds: {},
+        godStatus: agents.some((a) => a.isGod) ? 'ready' : 'booting'
+      };
+    }),
   messageQueues: initialQueues,
   toolCounts: {},
   bumpToolCount: (id) =>
@@ -1037,6 +1086,58 @@ export const useStore = create<State>((set, get) => ({
 
 export function selectedAgent(s: State): Agent | undefined {
   return s.agents.find(a => a.id === s.selectedId);
+}
+
+/** Flush the in-memory roster mirror now (project switch, before activate). */
+export function flushRoster(): void {
+  flushRosterNow();
+}
+
+function asAgentList(raw: unknown): Agent[] {
+  return Array.isArray(raw) ? (raw as Agent[]) : [];
+}
+
+function agentsFromRoster(raw: unknown): Agent[] {
+  return asAgentList(raw).map((a) => ({
+    ...a,
+    progress: 0,
+    status: 'idle' as const,
+    action: 'reconnecting…',
+    currentStation: 'desk' as const,
+    carrying: undefined,
+    recentTextTs: Date.now()
+  }));
+}
+
+function archivedFromRoster(raw: unknown): Agent[] {
+  return asAgentList(raw).map((a) => ({
+    ...a,
+    archived: true,
+    status: 'idle' as const,
+    ptyId: undefined,
+    carrying: undefined,
+    currentStation: undefined
+  }));
+}
+
+function restorableFromRoster(raw: unknown): Agent[] {
+  return asAgentList(raw).map((a) => ({
+    ...a,
+    status: 'idle' as const,
+    carrying: undefined,
+    currentStation: undefined
+  }));
+}
+
+function queuesFromRoster(raw: unknown): Record<string, QueuedMessage[]> {
+  if (!raw || typeof raw !== 'object') return {};
+  const out: Record<string, QueuedMessage[]> = {};
+  for (const [id, q] of Object.entries(raw as Record<string, unknown>)) {
+    if (Array.isArray(q)) {
+      out[id] = q.filter((m) => m && typeof (m as QueuedMessage).text === 'string' && typeof (m as QueuedMessage).id === 'string') as QueuedMessage[];
+    }
+  }
+  return out;
 }
 
 /** Whether the Command Center's Trigger History tab has anything to be about

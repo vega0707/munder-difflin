@@ -25,13 +25,20 @@ import {
   getLogGraph, getCommitFiles, getFileAtRev, compareRefs, listWorktrees, checkoutRef
 } from './git';
 import { HiveManager, type AgentMeta, type HiveMessage, type HiveTask } from './hive';
-import { HookServer } from './hooks';
+import { HookServer, HookHub } from './hooks';
 import { CircuitBreaker, type BreakerInput } from './breaker';
 import type { UsageProvider } from './usage';
 import { MemoryManager } from './memory';
 import { KnowledgeManager } from './knowledge';
 import { MemoryReflector, type ReflectSettings } from './reflect';
 import { PersistStore } from './db';
+import { ProjectRegistry, projectRootOf } from './projectRegistry';
+import { resolveHive, projectIdFromPayload } from './hiveRouter';
+import {
+  MAX_ACTIVE_AGENTS,
+  DEFAULT_PROJECT_ID,
+  type CreateProjectRole
+} from '../shared/projectTypes';
 import { readAgentUsage, readContextTokens, seedSessionTranscript, resolveSessionCwd } from './transcript';
 import { listIssues, listCIRuns } from './github';
 import { SlackWebhookServer, SlackReplyServer, postSlackReply, type SlackEventFile } from './slack';
@@ -231,14 +238,18 @@ const ptyToAgent = new Map<string, string>();
  *  install disabled) so the freshly-installed CLI launches in the SAME pty/window —
  *  no user click. Cleared the moment it's consumed, so it can never loop installs. */
 const pendingInstallRelaunch = new Map<string, { opts: AgentSpawnOptions; owner: Electron.WebContents | null; bin: string; rung: string }>();
-const hive = new HiveManager(
+const emitToRenderer = (channel: string, payload: unknown): boolean => {
+  const wc = liveWebContents();
+  if (!wc) return false;
+  try { wc.send(channel, payload); return true; } catch { return false; }
+};
+/** Process-wide "current floor". Rebound to the active project's HiveManager. */
+let hive = new HiveManager(
   () => readConfig().harnessHome,
-  (channel, payload) => {
-    const wc = liveWebContents();
-    if (!wc) return false;
-    try { wc.send(channel, payload); return true; } catch { return false; }
-  }
+  emitToRenderer,
+  DEFAULT_PROJECT_ID
 );
+let hiveServicesStarted = false;
 // #7C — operator control state (pause/gate/steer/halt), read by the HookServer
 // when deciding hook returns.
 const control = new ControlRegistry();
@@ -275,7 +286,12 @@ let breakerBeatTimer: ReturnType<typeof setInterval> | null = null;
 telemetry.onApiError((agentId) => breaker.recordError(agentId));
 // Shared roster on disk — created early so HookServer can re-read standing goals
 // on every UserPromptSubmit (Edit Agent saves land here via persistAgents).
-const roster = new RosterStore(() => readConfig().harnessHome);
+const roster = new RosterStore(() => {
+  const home = readConfig().harnessHome;
+  if (!home) return null;
+  const id = projectRegistry.getActiveProjectId();
+  return id ? projectRootOf(home, id) : home;
+});
 function standingGoalFromRoster(agentId: string): string | null {
   const snap = roster.read();
   if (!snap || !Array.isArray(snap.agents)) return null;
@@ -292,19 +308,23 @@ function standingGoalFromRoster(agentId: string): string | null {
 // background window can't leave a worker parked on an unread inbox forever).
 // HookServer feeds it the hook stream so a permission/HITL prompt blocks nudges.
 const workerWake = new WorkerWakeWatchdog();
-// HookServer needs BOTH: Oscar's control registry (HITL pause/gate/steer/halt via
-// hook returns) AND Jim's breaker (feed recordToolUse on each PostToolUse).
-const hookServer = new HookServer(
-  hive,
+// One HookServer per hive so two floors can both have agent id `god`.
+const hookHub = new HookHub((h) => new HookServer(
+  h,
   () => liveWebContents(),
   () => readConfig(),
   control,
   breaker,
   standingGoalFromRoster,
   (agentId, event, message) => workerWake.noteHook(agentId, event, message)
-);
+));
 const memory = new MemoryManager(
-  () => readConfig().harnessHome,
+  () => {
+    const home = readConfig().harnessHome;
+    if (!home) return null;
+    const id = projectRegistry.getActiveProjectId();
+    return id ? projectRootOf(home, id) : home;
+  },
   () => { const c = readConfig(); return { enabled: c.semanticMemory !== false, model: c.embeddingModel ?? 'minilm' }; }
 );
 // Enterprise Knowledge Graph — file-backed store + agent CLI (default OFF).
@@ -325,7 +345,12 @@ function reflectSettings(): ReflectSettings {
 // Finishes the janitor's missing condense half: bounds each agent's memory.md
 // (Haiku tail-summary, backup→verify→atomic-swap) so it never grows unbounded.
 const reflector = new MemoryReflector(
-  () => readConfig().harnessHome,
+  () => {
+    const home = readConfig().harnessHome;
+    if (!home) return null;
+    const id = projectRegistry.getActiveProjectId();
+    return id ? projectRootOf(home, id) : home;
+  },
   () => readConfig().defaultCommand ?? 'claude',
   () => memory.env(),
   reflectSettings,
@@ -334,6 +359,27 @@ const reflector = new MemoryReflector(
 // Durable harness state (SQLite, main process). Phase A: window bounds (kv) +
 // net-new command history. Opened in whenReady, closed in the teardown blocks.
 const persist = new PersistStore();
+function bindActiveHive(next: HiveManager, _previousId: string | null): void {
+  hive = next;
+  hive.setRuntimeInfo({
+    version: app.isReady() ? app.getVersion() : '',
+    packaged: app.isPackaged,
+    appPath: app.getAppPath()
+  });
+  hive.setOrchestratorMaySpawn(readConfig().orchestratorMaySpawn === true);
+}
+const projectRegistry = new ProjectRegistry({
+  persist,
+  getHarnessHome: () => readConfig().harnessHome,
+  pty: ptyManager,
+  emit: emitToRenderer,
+  onProjectReady: (h) => {
+    hookHub.ensure(h);
+    try { h.startRouter(); } catch { /* hive may not be on disk yet */ }
+  },
+  onProjectRemoved: (projectId) => hookHub.stop(projectId),
+  onActiveChanged: bindActiveHive
+});
 /** The PRIMARY window — the one running the hive/god orchestration and the sink
  *  for process-global timer events (missions, breaker, Slack ingestion). It is
  *  the most-recently-focused live window, so global events follow the user.
@@ -1035,6 +1081,11 @@ function lastCoordinationAt(agentId: string): number {
 
 /** PTY id owning a given agent id, or undefined. */
 function ptyForAgent(agentId: string): string | undefined {
+  const projectId = projectRegistry.getActiveProjectId();
+  if (projectId) {
+    const tagged = `pty:${projectId}:${agentId}`;
+    if (ptyToAgent.has(tagged)) return tagged;
+  }
   for (const [ptyId, a] of ptyToAgent) if (a === agentId) return ptyId;
   return undefined;
 }
@@ -2545,6 +2596,13 @@ async function spawnAgentCore(opts: AgentSpawnOptions, owner: Electron.WebConten
   // returned to the caller so the renderer records the same absolute path.
   opts.cwd = expandTilde(opts.cwd);
   if (opts.hive) opts.hive = { ...opts.hive, cwd: expandTilde(opts.hive.cwd) };
+  opts.projectId = opts.projectId
+    || projectIdFromPayload(opts)
+    || projectRegistry.getActiveProjectId()
+    || DEFAULT_PROJECT_ID;
+  if (ptyManager.getActivePtyCount() >= MAX_ACTIVE_AGENTS) {
+    return { ok: false, error: 'SPAWN_LIMIT_REACHED', code: 'SPAWN_LIMIT_REACHED' } as { ok: boolean; error?: string };
+  }
   // Which CLI is this? Explicit wins; else inferred from the binary
   // (claude/codex/grok/agy). Non-Claude providers skip every Claude-only spawn step
   // below. Persist the resolved provider onto opts (+ hive meta) so the registry
@@ -2683,9 +2741,10 @@ async function spawnAgentCore(opts: AgentSpawnOptions, owner: Electron.WebConten
   // seedDelivery:'type-into-tui') rather than passed on argv. Surfaced in the spawn
   // result so the renderer types it through the per-pty write-chain. (ondev-b)
   let seedPrompt: string | undefined;
-  if (opts.hive && hive.enabled()) {
+  const spawnHive = resolveHive(projectRegistry, hive, opts.projectId);
+  if (opts.hive && spawnHive.enabled()) {
     try {
-      const inj = await hive.ensureAgent(
+      const inj = await spawnHive.ensureAgent(
         { ...opts.hive, cwd: opts.cwd, provider },
         {
           semanticMemory: memory.active(),
@@ -2780,7 +2839,7 @@ async function spawnAgentCore(opts: AgentSpawnOptions, owner: Electron.WebConten
     // actually present (already or after the copy); otherwise fall back to a fresh
     // session rather than launching a `--resume` against a missing id.
     const explicitSid = typeof opts.resumeSessionId === 'string' ? opts.resumeSessionId.trim() : '';
-    const sid = explicitSid || (opts.resume === true ? hive.lastSession(opts.hive.id) : undefined);
+    const sid = explicitSid || (opts.resume === true ? spawnHive.lastSession(opts.hive.id) : undefined);
     if (sid && !args.includes('--resume')) {
       if (seedSessionTranscript(opts.cwd, sid)) {
         args.push('--resume', sid);
@@ -2813,7 +2872,7 @@ async function spawnAgentCore(opts: AgentSpawnOptions, owner: Electron.WebConten
     // resumeSessionId was read ONLY in the Claude branch, so a Codex agent
     // silently ignored it and started a brand-new empty session.
     const typedSid = typeof opts.resumeSessionId === 'string' ? opts.resumeSessionId.trim() : '';
-    const sid = typedSid || (opts.resume === true ? hive.lastSession(opts.hive.id) : undefined);
+    const sid = typedSid || (opts.resume === true ? spawnHive.lastSession(opts.hive.id) : undefined);
     if (sid && rf) {
       const args = opts.args ?? [];
       if (!args.includes(rf)) { args.push(rf, sid); opts.args = args; didResume = true; }
@@ -3194,7 +3253,7 @@ ipcMain.handle('config:changeHome', async (_evt, payload: unknown) => {
   try { stopEphemeralWorkerWatcher(); } catch (e) { console.error('[changeHome] stopWorkerWatcher:', e); }
   try { integrationBroker.stop(); } catch (e) { console.error('[changeHome] broker.stop:', e); }
   try { hive.stopRouter(); } catch (e) { console.error('[changeHome] stopRouter:', e); }
-  try { hookServer.stop(); } catch (e) { console.error('[changeHome] hookServer.stop:', e); }
+  try { hookHub.stopAll(); } catch (e) { console.error('[changeHome] hookHub.stop:', e); }
   try { stopSlackServer(); } catch (e) { console.error('[changeHome] slack.stop:', e); }
   try { stopWebhookServer(); } catch (e) { console.error('[changeHome] webhook.stop:', e); }
   try { memory.stop(); } catch (e) { console.error('[changeHome] memory.stop:', e); }
@@ -3206,7 +3265,7 @@ ipcMain.handle('config:changeHome', async (_evt, payload: unknown) => {
       // renderer's half of the same state, and leaving it behind would move the
       // agents' sessions and memory to the new home while their names, notes and
       // worktree paths stayed at the old one.
-      for (const sub of ['hive', 'palace', 'roster.json', 'roster-backups']) {
+      for (const sub of ['hive', 'palace', 'roster.json', 'roster-backups', 'projects', 'hive.pre-migrate', 'roster.pre-migrate.json']) {
         const src = join(oldHome, sub);
         if (!existsSync(src)) continue;
         // cpSync copies the whole tree incl. .git and is cross-device safe (unlike
@@ -3386,25 +3445,82 @@ ipcMain.on('config:homeSync', (evt) => { evt.returnValue = readConfig().harnessH
 ipcMain.handle('roster:read', () => roster.read());
 ipcMain.handle('roster:write', (_evt, snap: unknown) => roster.write(snap));
 
+ipcMain.handle('project:list', () => projectRegistry.listProjects());
+ipcMain.handle('project:getActive', () => ({
+  projectId: projectRegistry.getActiveProjectId(),
+  project: projectRegistry.getActiveProjectId()
+    ? projectRegistry.getMeta(projectRegistry.getActiveProjectId()!)
+    : undefined
+}));
+ipcMain.handle('project:create', async (_evt, payload: unknown) => {
+  const body = payload && typeof payload === 'object' ? payload as {
+    name?: unknown;
+    defaultCwd?: unknown;
+    roles?: unknown;
+  } : {};
+  if (typeof body.name !== 'string') {
+    return { ok: false, code: 'CREATE_FAILED', error: 'project name required' };
+  }
+  const roles = (Array.isArray(body.roles) ? body.roles : []) as CreateProjectRole[];
+  const res = await projectRegistry.createProject({
+    name: body.name,
+    defaultCwd: typeof body.defaultCwd === 'string' ? body.defaultCwd : undefined,
+    roles
+  });
+  if (res.ok) {
+    try { bootstrapHiveServices(); } catch (e) { console.error('[project] bootstrap after create:', e); }
+    return { ...res, roster: roster.read() };
+  }
+  return res;
+});
+ipcMain.handle('project:activate', (_evt, projectId: unknown) => {
+  if (typeof projectId !== 'string' || !projectId) {
+    return { ok: false, code: 'PROJECT_NOT_FOUND', error: 'projectId required' };
+  }
+  const res = projectRegistry.activate(projectId);
+  if (res.ok) return { ...res, roster: roster.read() };
+  return res;
+});
+ipcMain.handle('project:delete', (_evt, projectId: unknown) => {
+  if (typeof projectId !== 'string' || !projectId) {
+    return { ok: false, code: 'PROJECT_NOT_FOUND', error: 'projectId required' };
+  }
+  const res = projectRegistry.deleteProject(projectId);
+  if (res.ok) {
+    return {
+      ...res,
+      activeProjectId: projectRegistry.getActiveProjectId(),
+      roster: roster.read()
+    };
+  }
+  return res;
+});
+
 // ─── IPC: hive (multi-agent coordination) ───────────────────────────────────
-ipcMain.handle('hive:registry', () => hive.registry());
-ipcMain.handle('hive:renameAgent', (_evt, id: unknown, name: unknown) => {
+function hiveIPC(projectId?: unknown): HiveManager {
+  return resolveHive(projectRegistry, hive, projectId);
+}
+ipcMain.handle('hive:registry', (_evt, projectId?: unknown) => hiveIPC(projectId).registry());
+ipcMain.handle('hive:renameAgent', (_evt, id: unknown, name: unknown, projectId?: unknown) => {
   if (typeof id !== 'string' || typeof name !== 'string') {
     return { ok: false, error: 'Invalid rename request' };
   }
-  return hive.renameAgent(id, name);
+  return hiveIPC(projectId).renameAgent(id, name);
 });
-ipcMain.handle('hive:setAgentHold', (_evt, id: unknown, hold: unknown) => {
+ipcMain.handle('hive:setAgentHold', (_evt, id: unknown, hold: unknown, projectId?: unknown) => {
   if (typeof id !== 'string' || typeof hold !== 'boolean') {
     return { ok: false, error: 'Invalid hold request' };
   }
-  return hive.setAgentHold(id, hold);
+  return hiveIPC(projectId).setAgentHold(id, hold);
 });
-ipcMain.handle('hive:board', () => hive.board());
-ipcMain.handle('hive:tasks', () => hive.tasks());
-ipcMain.handle('hive:log', (_evt, n: unknown) => hive.logTail(typeof n === 'number' ? n : 200));
-ipcMain.handle('hive:memory', (_evt, id: unknown) => (typeof id === 'string' ? hive.memory(id) : ''));
-ipcMain.handle('hive:inbox', (_evt, id: unknown) => (typeof id === 'string' ? hive.inbox(id) : []));
+ipcMain.handle('hive:board', (_evt, projectId?: unknown) => hiveIPC(projectId).board());
+ipcMain.handle('hive:tasks', (_evt, projectId?: unknown) => hiveIPC(projectId).tasks());
+ipcMain.handle('hive:log', (_evt, n: unknown, projectId?: unknown) =>
+  hiveIPC(projectId).logTail(typeof n === 'number' ? n : 200));
+ipcMain.handle('hive:memory', (_evt, id: unknown, projectId?: unknown) =>
+  (typeof id === 'string' ? hiveIPC(projectId).memory(id) : ''));
+ipcMain.handle('hive:inbox', (_evt, id: unknown, projectId?: unknown) =>
+  (typeof id === 'string' ? hiveIPC(projectId).inbox(id) : []));
 // Voice read-layer: recent message CONTENT (inbox/outbox bodies), REDACTED
 // main-side by hive.voiceMessages(). The renderer/voice layer never sees a raw
 // body — secrets are stripped here, before the result crosses IPC.
@@ -3686,7 +3802,7 @@ function teardownAndQuit(): void {
   try { stopEphemeralWorkerWatcher(); } catch (e) { console.error('[quit] stopWorkerWatcher:', e); }
   try { integrationBroker.stop(); } catch (e) { console.error('[quit] broker.stop:', e); }
   try { hive.stopRouter(); } catch (e) { console.error('[quit] stopRouter:', e); }
-  try { hookServer.stop(); } catch (e) { console.error('[quit] hookServer.stop:', e); }
+  try { hookHub.stopAll(); } catch (e) { console.error('[quit] hookHub.stop:', e); }
   try { telemetry.stop(); } catch (e) { console.error('[quit] telemetry.stop:', e); }
   try { stopSlackServer(); } catch (e) { console.error('[quit] slack.stop:', e); }
   try { stopWebhookServer(); } catch (e) { console.error('[quit] webhook.stop:', e); }
@@ -3747,7 +3863,7 @@ ipcMain.handle('app:resetAll', () => {
   try { stopEphemeralWorkerWatcher(); } catch (e) { console.error('[reset] stopWorkerWatcher:', e); }
   try { integrationBroker.stop(); } catch (e) { console.error('[reset] broker.stop:', e); }
   try { hive.stopRouter(); } catch (e) { console.error('[reset] stopRouter:', e); }
-  try { hookServer.stop(); } catch (e) { console.error('[reset] hookServer.stop:', e); }
+  try { hookHub.stopAll(); } catch (e) { console.error('[reset] hookHub.stop:', e); }
   try { telemetry.stop(); } catch (e) { console.error('[reset] telemetry.stop:', e); }
   try { stopSlackServer(); } catch (e) { console.error('[reset] slack.stop:', e); }
   try { memory.stop(); } catch (e) { console.error('[reset] memory.stop:', e); }
@@ -3788,7 +3904,7 @@ ipcMain.handle('hive:agentUsage', (_evt, cwd: unknown) =>
 // (re)started session zeroes the gauge instead of leaving a stale value up.
 ipcMain.handle('hive:agentContext', (_evt, agentId: unknown) => {
   if (typeof agentId !== 'string') return null;
-  const tp = hookServer.transcriptPath(agentId);
+  const tp = hookHub.transcriptPath(agentId, projectRegistry.getActiveProjectId());
   if (!tp) return null;
   return readContextTokens(tp) ?? 0;
 });
@@ -3812,7 +3928,7 @@ ipcMain.handle('hive:agentDirectory', () => {
     const u = usageById.get(id);
     const spans = snap.spans[id] ?? [];
     const tokens = u ? u.input + u.output + u.cacheRead + u.cacheCreation : 0;
-    const ctx = hookServer.contextFor(id);
+    const ctx = hookHub.contextFor(id, projectRegistry.getActiveProjectId());
     return {
       id,
       name: a.name,
@@ -4951,63 +5067,57 @@ ipcMain.handle('workers:stop', (_evt, workerId: string): { ok: boolean; error?: 
  *  Called on boot, and again to recover in place if a folder-change copy fails
  *  (config:changeHome tears these down before copying). No-op without a home. */
 function bootstrapHiveServices(): void {
-  if (!hive.enabled()) return;
-  hive.ensureHive();
-  // Tell the hive what it is running inside, BEFORE anything spawns: the prompt
-  // builder reads this, so an agent spawned earlier would never learn it.
-  hive.setRuntimeInfo({ version: app.getVersion(), packaged: app.isPackaged, appPath: app.getAppPath() });
-  hive.setOrchestratorMaySpawn(readConfig().orchestratorMaySpawn === true);
-  // An app-start marker in the event log. log.jsonl had twelve event kinds and
-  // none of them meant "the app restarted", so a relaunch, and more importantly a
-  // switch between a packaged build and a local one, was invisible to every agent
-  // reading the feed. That gap cost a multi-hour investigation whose answer was
-  // exactly this: a local build inherits the launching shell's umask, a
-  // Finder-launched app does not.
-  hive.appendLog({
-    kind: 'app-start',
-    version: app.getVersion(),
-    packaged: app.isPackaged,
-    // WHICH bundle, not just which version. Version plus packaged is not enough
-    // to tell two builds apart: a stale copy in /Applications and a fresh one in
-    // dist/ can report the same version and both be packaged, and picking the
-    // wrong one by habit looks exactly like the new build being broken. Cost us
-    // twice before this line existed.
-    appPath: app.getAppPath(),
-    exePath: process.execPath,
-    electron: process.versions.electron,
-    platform: process.platform
-  });
+  const home = readConfig().harnessHome;
+  if (!home) return;
+  projectRegistry.bootstrap();
+  const next = projectRegistry.activeHive();
+  if (next) {
+    hive = next;
+    hive.ensureHive();
+    hive.setRuntimeInfo({ version: app.getVersion(), packaged: app.isPackaged, appPath: app.getAppPath() });
+    hive.setOrchestratorMaySpawn(readConfig().orchestratorMaySpawn === true);
+    hive.appendLog({
+      kind: 'app-start',
+      version: app.getVersion(),
+      packaged: app.isPackaged,
+      appPath: app.getAppPath(),
+      exePath: process.execPath,
+      electron: process.versions.electron,
+      platform: process.platform
+    });
+    for (const h of projectRegistry.listHives()) {
+      hookHub.ensure(h);
+      try { h.startRouter(); } catch { /* per-hive */ }
+    }
+  } else if (!hiveServicesStarted) {
+    // No project yet — wait for project:create (must pick a god).
+    return;
+  }
+
+  if (hiveServicesStarted) return;
+  if (!projectRegistry.activeHive()) return;
+
   control.replaceAutoDeliveryPauses(readConfig().autoDeliveryPausedAgents ?? []);
-  archiveOrphanedAgents(); // #57/#58: archive stale archived:false entries with no live PTY
-  hive.startRouter();
-  startEphemeralWorkerWatcher(); // poll HIVE_ROOT/spawn-requests → ephemeral workers
-  // Phase 2: the loopback secret broker. Bind it BEFORE workers spawn so each spawn can
-  // be granted a capability token + the broker URL in its env. Loopback-only, idempotent.
+  archiveOrphanedAgents();
+  startEphemeralWorkerWatcher();
   void integrationBroker.start().then((r) => {
     if (r.ok) console.log('[broker] integration broker listening on', integrationBroker.url());
     else console.error('[broker] failed to start:', r.error);
   });
-  ensureDefaultMissions(); // one-time: seed the built-in hourly ops standup
-  syncMissions(); // arm recurring auto-dispatch missions now the router is live
-  syncContextTriggers(); // …and the context trigger's own compact/clear cadences
-  // Pair replies to inbound webhook messages in the ledger. Tied to the FEATURE
-  // (any endpoint configured), not to the server: an approved message's card can
-  // finish long after the operator switched the public surface back off, and its
-  // reply still belongs in the history.
+  ensureDefaultMissions();
+  syncMissions();
+  syncContextTriggers();
   if ((readConfig().webhookTriggers ?? []).length > 0) startWebhookDoneObserver();
-  hookServer.start();
-  // Bind the telemetry collector BEFORE the renderer spawns any agent, then point
-  // the hive at it so every subsequent spawn is instrumented. Best-effort — a bind
-  // failure just leaves telemetry off (transcript reconciler stays). No breaker.start():
-  // the breaker is POLICY-only, ticked by the heartbeat beat (#1, ships disabled).
   void telemetry.start().then((r) => {
-    if (r.ok && r.endpoint) { hive.setOtelEndpoint(r.endpoint); console.log('[telemetry] collector listening', r.endpoint); }
-    else console.error('[telemetry] collector failed to start:', r.error);
+    if (r.ok && r.endpoint) {
+      for (const h of projectRegistry.listHives()) h.setOtelEndpoint(r.endpoint);
+      console.log('[telemetry] collector listening', r.endpoint);
+    } else console.error('[telemetry] collector failed to start:', r.error);
   });
-  memory.start(); // init shared palace + mine loop (no-op without mempalace)
-  reflector.start(); // bound oversized memory.md files on a timer (no-op until threshold)
-
+  memory.start();
+  reflector.start();
   armAlwaysOnBeats();
+  hiveServicesStarted = true;
 }
 
 /** Cadence of the worker inbox-wake watchdog (#151). Well under the renderer's

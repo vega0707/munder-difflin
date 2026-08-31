@@ -210,6 +210,8 @@ export interface SpawnPtyOptions {
   hive?: HiveAgentMeta;
   /** When true (and cwd is a git repo), spawn the agent in its own git worktree. */
   isolate?: boolean;
+  /** Owning project. Main stamps the active project when omitted. */
+  projectId?: string;
   /** When true, continue the agent's prior CLI session if one was recorded
    *  (provider-aware: Claude/Grok `--resume`, Antigravity `--conversation`). For
    *  Claude the main process looks up the session id from the hive registry and
@@ -594,6 +596,8 @@ const api = {
     pid: number;
     lastOutputAt: number;
     hasOutput: boolean;
+    projectId?: string;
+    suspended?: boolean;
   }>> =>
     ipcRenderer.invoke('pty:list'),
   /** Resolve a Claude session id to the cwd it originally ran in (Add Agent
@@ -745,8 +749,53 @@ const api = {
       { ok: true; detached: boolean } | { ok: false; error: string }
     >,
 
+  // ─── Projects (multi-hive) ───────────────────────────────────────────────
+  projectList: () =>
+    ipcRenderer.invoke('project:list') as Promise<Array<{
+      projectId: string; name: string; createdAt: number; status: string;
+      defaultCwd?: string; hiveRootPath: string; godCharacter: string;
+    }>>,
+  projectGetActive: () =>
+    ipcRenderer.invoke('project:getActive') as Promise<{
+      projectId: string | null;
+      project?: {
+        projectId: string; name: string; createdAt: number; status: string;
+        defaultCwd?: string; hiveRootPath: string; godCharacter: string;
+      };
+    }>,
+  projectCreate: (input: {
+    name: string;
+    defaultCwd?: string;
+    roles: Array<{ character: string; asGod?: boolean }>;
+  }) =>
+    ipcRenderer.invoke('project:create', input) as Promise<
+      | { ok: true; project: { projectId: string; name: string; godCharacter: string; hiveRootPath: string; defaultCwd?: string; status: string; createdAt: number }; roster: RosterSnapshot | null }
+      | { ok: false; code: string; error: string }
+    >,
+  projectActivate: (projectId: string) =>
+    ipcRenderer.invoke('project:activate', projectId) as Promise<
+      | { ok: true; project: { projectId: string; name: string; godCharacter: string; hiveRootPath: string; defaultCwd?: string; status: string; createdAt: number }; roster: RosterSnapshot | null }
+      | { ok: false; code: string; error: string }
+    >,
+  projectDelete: (projectId: string) =>
+    ipcRenderer.invoke('project:delete', projectId) as Promise<
+      | { ok: true; project: { projectId: string; name: string }; activeProjectId: string | null; roster: RosterSnapshot | null }
+      | { ok: false; code: string; error: string }
+    >,
+  onProjectChanged: (cb: (e: { projectId: string; action: string }) => void): (() => void) => {
+    const listener = (_e: IpcRendererEvent, payload: { projectId: string; action: string }) => cb(payload);
+    ipcRenderer.on('project:changed', listener);
+    return () => ipcRenderer.removeListener('project:changed', listener);
+  },
+  onProjectActiveChanged: (cb: (e: { projectId: string; previousId?: string | null }) => void): (() => void) => {
+    const listener = (_e: IpcRendererEvent, payload: { projectId: string; previousId?: string | null }) => cb(payload);
+    ipcRenderer.on('project:active-changed', listener);
+    return () => ipcRenderer.removeListener('project:active-changed', listener);
+  },
+
   // ─── Hive (multi-agent coordination) ─────────────────────────────────────
-  hiveRegistry: (): Promise<HiveRegistry> => ipcRenderer.invoke('hive:registry'),
+  hiveRegistry: (projectId?: string): Promise<HiveRegistry> =>
+    ipcRenderer.invoke('hive:registry', projectId),
   /** Persist a hire/job role to hive registry.json + identity.md (no respawn). */
   hivePatchAgentRole: (id: string, role: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('hive:patchAgentRole', id, role),

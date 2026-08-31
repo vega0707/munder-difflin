@@ -5,6 +5,7 @@ import type { HarnessConfig } from '@/store/config';
 import { DEFAULT_ORG_TRIGGER } from '@shared/triggers';
 import { OfficeFloor } from '@/scene/office/OfficeFloor';
 import { useHive } from '@/hooks/useHive';
+import { useProjects } from '@/hooks/useProjects';
 import { useResolvedGodName } from '@/hooks/useResolvedGodName';
 import { useGodNameSync } from '@/i18n/useGodNameSync';
 import { useDirectionSync } from '@/i18n/useDirection';
@@ -16,6 +17,9 @@ import { AddAgentModal } from '@/components/AddAgentModal';
 import { MichaelBooting } from '@/components/MichaelBooting';
 import { OnboardingWizard } from '@/components/OnboardingWizard';
 import { HivePicker } from '@/components/HivePicker';
+import { ProjectCreateDialog } from '@/components/ProjectCreateDialog';
+import { ProjectTabBar } from '@/components/ProjectTabBar';
+import { ProjectDeleteDialog } from '@/components/ProjectDeleteDialog';
 import { QuitWarningModal, type ClosingTimeState } from '@/components/QuitWarningModal';
 import { CompletionToast } from '@/realtime/CompletionToast';
 import { UpdateToast } from '@/components/UpdateToast';
@@ -76,6 +80,8 @@ export function App() {
   /** Which tab Settings opens on. Set by a `cth:open-settings` deep link, reset
    *  to undefined (→ General) whenever the modal is opened the normal way. */
   const [settingsSection, setSettingsSection] = useState<SettingsSection | undefined>(undefined);
+  const [projectCreateOpen, setProjectCreateOpen] = useState(false);
+  const [projectDeleteId, setProjectDeleteId] = useState<string | null>(null);
   const [quitWarn, setQuitWarn] = useState<{ ptyCount: number } | null>(null);
   const [closing, setClosing] = useState<ClosingTimeState | null>(null);
   const [vpWidth, setVpWidth] = useState<number>(window.innerWidth);
@@ -186,6 +192,11 @@ export function App() {
     void window.cth.cancelClosingTime();
     setClosing(null);
   };
+
+  const { switchError, activate, remove } = useProjects({
+    ready: !!config?.onboardingComplete && !!config?.harnessHome,
+    onNeedCreate: () => setProjectCreateOpen(true)
+  });
 
   // The hive: god-agent bootstrap, hook-driven avatars, idle-agent waking. Held
   // off until a harness home is configured (passing null no-ops the hook) so
@@ -306,10 +317,17 @@ export function App() {
         {/* v0.3.7: the version is no longer inert text — it doubles as the
             update control (check / download / restart to update). */}
         <UpdateBadge />
+        <ProjectTabBar
+          onCreate={() => setProjectCreateOpen(true)}
+          onActivate={(id) => { void activate(id); }}
+          onRequestDelete={(id) => setProjectDeleteId(id)}
+          error={switchError}
+        />
         <span style={{
           fontFamily: 'var(--cth-font-ui)',
           fontSize: 13,
-          color: 'var(--cth-ink-500)'
+          color: 'var(--cth-ink-500)',
+          flexShrink: 0
         }}>
           {config.autoMode ? 'auto mode on' : 'auto mode off'}
         </span>
@@ -495,6 +513,32 @@ export function App() {
           config={config}
           initialSection={settingsSection}
           onClose={() => { setSettingsOpen(false); setSettingsSection(undefined); }}
+        />
+      )}
+
+      {projectCreateOpen && (
+        <ProjectCreateDialog
+          onClose={() => setProjectCreateOpen(false)}
+          onCreated={(projectId) => {
+            void window.cth.projectList().then((list) => {
+              useStore.getState().setProjectList(list.map((p) => ({
+                ...p,
+                status: p.status as 'active' | 'degraded' | 'pending-deletion',
+                godCharacter: p.godCharacter as import('@shared/projectTypes').OfficeCharacterName
+              })));
+            });
+            useStore.getState().setActiveProjectId(projectId);
+          }}
+        />
+      )}
+      {projectDeleteId && (
+        <ProjectDeleteDialog
+          projectId={projectDeleteId}
+          onClose={() => setProjectDeleteId(null)}
+          onConfirm={(id) => {
+            setProjectDeleteId(null);
+            void remove(id);
+          }}
         />
       )}
 
