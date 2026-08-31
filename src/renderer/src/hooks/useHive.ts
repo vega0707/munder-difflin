@@ -240,11 +240,23 @@ const TOOL_STATION: Record<string, { station: StationKind; carry?: ToolKind }> =
   Task: { station: 'mailbox', carry: 'TodoWrite' }
 };
 
+/** Browser-bridge MCP tools (e.g. mcp__munder-browser-bridge__browser_tabs). */
+function isBrowserAutomationTool(tool: string): boolean {
+  return /browser_/i.test(tool) || tool.includes('munder-browser-bridge');
+}
+
+/** Desktop-control MCP tools (e.g. mcp__munder-desktop-control__desktop_click). */
+function isDesktopAutomationTool(tool: string): boolean {
+  return /desktop_/i.test(tool) || tool.includes('munder-desktop-control');
+}
+
 /** Resolve a tool name to its station/glyph. Falls back: any `mcp__*` tool →
  *  the MCP station (previously these silently sat at the desk, #5A gap); anything
  *  else → the desk. */
 function stationForTool(tool: string): { station: StationKind; carry?: ToolKind } {
   if (TOOL_STATION[tool]) return TOOL_STATION[tool];
+  if (isBrowserAutomationTool(tool)) return { station: 'web', carry: 'WebFetch' };
+  if (isDesktopAutomationTool(tool)) return { station: 'terminal', carry: 'Bash' };
   if (tool.startsWith('mcp__')) return { station: 'mcp', carry: 'MCP' };
   // Heuristic fallback for non-Claude tool names (Antigravity sends run_command,
   // ListDir, write_file, … — its hook names differ from Claude's exact tags).
