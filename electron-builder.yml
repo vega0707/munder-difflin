@@ -75,11 +75,16 @@ extraResources:
   # repo resources/skills). Directory copy preserves the <id>/SKILL.md tree.
   - from: resources/skills
     to: skills
+  # stdio MCP scripts (browser-bridge, desktop-control) — spawned by hive hookSettings.
+  - from: resources/mcp/browser-bridge
+    to: mcp/browser-bridge
 
 asarUnpack:
   - "**/node_modules/node-pty/**"
   # better-sqlite3 is native (bindings/prebuild need the .node on the real FS).
   - "**/node_modules/better-sqlite3/**"
+  # stdio MCP scripts resolve @modelcontextprotocol/sdk from app.asar.unpacked.
+  - "**/node_modules/@modelcontextprotocol/**"
 
 # Rebuild native deps (node-pty) for the target during packaging.
 npmRebuild: true

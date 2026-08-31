@@ -149,6 +149,18 @@ export const MCP_CATALOG: McpCatalogEntry[] = [
     spec: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-brave-search'], env: { BRAVE_API_KEY: '' } },
     tier: 'secret',
     defaultEnabled: false
+  },
+  {
+    id: 'browser-bridge',
+    label: 'Browser (Chrome extension)',
+    description: 'Drive your real Chrome via the Munder browser extension (login state preserved).',
+    spec: {
+      command: 'node',
+      args: ['<mcp-browser-bridge>'],
+      env: { MUNDER_AUTOMATION_SOCK: '<sock>' }
+    },
+    tier: 'write',
+    defaultEnabled: false
   }
 ];
 

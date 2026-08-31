@@ -38,6 +38,7 @@ import {
   type AgentProvider
 } from '../shared/agentProvider';
 import { MCP_CATALOG } from '../shared/mcpCatalog';
+import { automationSocketPath } from './automationBridge';
 import { seatMcpEnabledMap, seatSkillAllowed, parseSeatAllowlist } from '../shared/seatTools';
 import { selectBroadcastTargets } from '../shared/broadcast';
 import { preferredAgentRole } from '../shared/agentRole';
@@ -1316,6 +1317,9 @@ export class HiveManager {
       (id) => MCP_CATALOG.find((e) => e.id === id)?.defaultEnabled ?? false,
       seatMcp
     );
+    const sockPath = automationSocketPath();
+    const mcpScriptPath = this.browserBridgeMcpScriptPath();
+    const appRoot = this.mcpAppRoot();
     const out: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {};
     for (const e of MCP_CATALOG) {
       const consented = cfg?.[e.id]?.enabled;
@@ -1325,16 +1329,52 @@ export class HiveManager {
       // never ride in on a default (the catalog already ships these OFF, but this
       // guards a hand-edited/partial mcpDefaults map too).
       if (e.tier !== 'safe-readonly' && consented !== true) continue;
-      // Replace the `<cwd>` placeholder (filesystem/git) with the agent cwd at merge
-      // time so these stay strictly workspace-scoped.
-      const args = e.spec.args.map((a) => (a === '<cwd>' ? cwd : a));
+      // Replace spawn placeholders at merge time.
+      const args = e.spec.args.map((a) => {
+        if (a === '<cwd>') return cwd;
+        if (a === '<mcp-browser-bridge>') return mcpScriptPath;
+        return a;
+      });
+      let env: Record<string, string> | undefined;
+      if (e.spec.env) {
+        env = {};
+        for (const [key, val] of Object.entries(e.spec.env)) {
+          env[key] = val === '<sock>' ? sockPath : val;
+        }
+        if (e.id === 'browser-bridge' && appRoot) {
+          env.MUNDER_APP_ROOT = appRoot;
+        }
+      }
       out[`munder-${e.id}`] = {
         command: e.spec.command,
         args,
-        ...(e.spec.env ? { env: e.spec.env } : {})
+        ...(env ? { env } : {})
       };
     }
     return out;
+  }
+
+  /** Absolute path to the bundled browser-bridge stdio MCP script. */
+  private browserBridgeMcpScriptPath(): string {
+    const rt = this.runtimeInfo();
+    if (rt?.packaged) {
+      return join(process.resourcesPath, 'mcp', 'browser-bridge', 'index.cjs');
+    }
+    const appPath = rt?.appPath ?? process.cwd();
+    return join(appPath, 'resources', 'mcp', 'browser-bridge', 'index.cjs');
+  }
+
+  /** App root for MCP child processes to resolve @modelcontextprotocol/sdk. */
+  private mcpAppRoot(): string | null {
+    const rt = this.runtimeInfo();
+    if (!rt) return null;
+    if (rt.packaged && rt.appPath) {
+      const asarDir = dirname(rt.appPath);
+      const unpacked = join(asarDir, 'app.asar.unpacked');
+      if (existsSync(unpacked)) return unpacked;
+      return asarDir;
+    }
+    return rt.appPath ?? process.cwd();
   }
 
   /**

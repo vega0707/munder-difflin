@@ -63,6 +63,7 @@ import {
   type WebhookDispatch, type WebhookEndpointRef, type WebhookInbound, type WebhookTaskStatus
 } from './webhook';
 import { startBrowserBridge, stopBrowserBridge } from './browserBridge';
+import { startAutomationBridge, stopAutomationBridge } from './automationBridge';
 import {
   classifyInboundKind, isAutoAllowed,
   DEFAULT_CONTEXT_TRIGGER, DEFAULT_ORG_TRIGGER, DEFAULT_TRIGGER_MODE, DEFAULT_WEBHOOK_SCHEMA,
@@ -4445,6 +4446,7 @@ function teardownAndQuit(): void {
   try { telemetry.stop(); } catch (e) { console.error('[quit] telemetry.stop:', e); }
   try { stopSlackServer(); } catch (e) { console.error('[quit] slack.stop:', e); }
   try { stopWebhookServer(); } catch (e) { console.error('[quit] webhook.stop:', e); }
+  try { stopAutomationBridge(); } catch (e) { console.error('[quit] automationBridge.stop:', e); }
   try { stopBrowserBridge(); } catch (e) { console.error('[quit] browserBridge.stop:', e); }
   try { memory.stop(); } catch (e) { console.error('[quit] memory.stop:', e); }
   try { reflector.stop(); } catch (e) { console.error('[quit] reflector.stop:', e); }
@@ -6022,6 +6024,7 @@ app.whenReady().then(() => {
   // Bootstrap the hive (if harnessHome is configured) and start the message router.
   bootstrapHiveServices();
   try { startBrowserBridge(); } catch (e) { console.error('[browser-bridge] start failed:', e); }
+  try { startAutomationBridge(); } catch (e) { console.error('[automation-bridge] start failed:', e); }
   // Survive sleep/lock. macOS freezes libuv timers during true system sleep, so a
   // locked/idle/slept Mac stops firing schedules and can wedge PTYs. On wake we
   // re-arm the scheduler (catching up missed missions ONCE) + beats + keep-awake,

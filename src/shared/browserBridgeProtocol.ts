@@ -11,6 +11,7 @@ export type BridgeErrorCode =
   | 'BROWSER_BRIDGE_DISCONNECTED'
   | 'BROWSER_BRIDGE_AUTH_FAILED'
   | 'BROWSER_BRIDGE_TIMEOUT'
+  | 'BROWSER_BRIDGE_BAD_REQUEST'
   | 'STALE_REF';
 
 export interface BridgeRequest {
