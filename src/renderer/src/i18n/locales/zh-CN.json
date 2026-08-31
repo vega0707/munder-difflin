@@ -940,6 +940,32 @@
       "secretNote": "这些服务器需要 API 密钥或凭据。默认关闭——添加凭据并在同意后启用。"
     }
   },
+  "browserDesktop": {
+    "title": "浏览器与桌面控制",
+    "desc": "连接 Chrome 扩展以实现浏览器自动化，并授予系统权限以启用完整桌面控制。",
+    "warning": "完整桌面控制允许智能体移动指针、输入文字并截屏，且无需逐项确认。仅在充分理解风险后，才启用 desktop-control MCP 服务器（写入层级）。",
+    "browserTitle": "浏览器扩展",
+    "browserDesc": "从仓库加载未打包扩展，并使用下方令牌连接。",
+    "connected": "扩展已连接",
+    "disconnected": "扩展未连接",
+    "listening": "桥接服务运行中",
+    "notListening": "桥接服务未运行",
+    "port": "端口",
+    "token": "桥接令牌",
+    "copyToken": "复制令牌",
+    "regenerateToken": "重新生成",
+    "tokenCopied": "令牌已复制",
+    "tokenRegenerated": "令牌已重新生成——请重新连接扩展",
+    "tokenRegenerateFailed": "无法重新生成令牌",
+    "extensionPath": "扩展目录",
+    "extensionPathHint": "extensions/munder-browser",
+    "desktopTitle": "桌面权限",
+    "desktopDesc": "截屏、点击和键盘自动化所需。",
+    "accessibility": "辅助功能（Accessibility）",
+    "screenCapture": "屏幕录制",
+    "openAccessibilitySettings": "打开辅助功能设置",
+    "openScreenCaptureSettings": "打开屏幕录制设置"
+  },
   "devicePicker": {
     "microphone": "麦克风",
     "speaker": "扬声器",

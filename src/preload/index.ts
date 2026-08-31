@@ -1489,6 +1489,18 @@ const api = {
     ipcRenderer.invoke('integrations:remove', req),
   integrationsTest: (req: { id: string; path?: string }): Promise<{ ok: boolean; status?: number; error?: string }> =>
     ipcRenderer.invoke('integrations:test', req),
+
+  // ─── Browser bridge + desktop control (Settings → Connections) ───────────
+  browserBridgeStatus: (): Promise<{ listening: boolean; extensionConnected: boolean; port: number }> =>
+    ipcRenderer.invoke('browserBridge:status'),
+  browserBridgeRegenerateToken: (): Promise<{ token: string }> =>
+    ipcRenderer.invoke('browserBridge:regenerateToken'),
+  desktopControlPermissionStatus: (): Promise<{ accessibility: boolean; screenCapture: boolean }> =>
+    ipcRenderer.invoke('desktopControl:permissionStatus'),
+  desktopControlOpenAccessibilitySettings: (): Promise<void> =>
+    ipcRenderer.invoke('desktopControl:openAccessibilitySettings'),
+  desktopControlOpenScreenCaptureSettings: (): Promise<void> =>
+    ipcRenderer.invoke('desktopControl:openScreenCaptureSettings'),
   // Per-CLI-provider BYOK keys — WRITE-ONLY. `providerKeySet` stores a backend key one
   // way (never echoed); `providerKeyHas` returns only a boolean; no method ever returns
   // the plaintext. Keys are materialized MAIN-ONLY at spawn.

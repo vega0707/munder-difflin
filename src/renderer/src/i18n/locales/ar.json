@@ -940,6 +940,32 @@
       "secretNote": "تتطلّب هذه الخوادم مفتاح API أو بيانات اعتماد. معطّلة افتراضيًا — أضف بياناتك ثم فعّلها بعد الموافقة."
     }
   },
+  "browserDesktop": {
+    "title": "التحكم بالمتصفح وسطح المكتب",
+    "desc": "اربط امتداد Chrome لأتمتة المتصفح، وامنح أذونات النظام للتحكم الكامل بسطح المكتب.",
+    "warning": "التحكم الكامل بسطح المكتب يتيح للوكلاء تحريك المؤشر والكتابة والتقاط الشاشة دون تأكيد لكل إجراء. لا تفعّل خادم desktop-control MCP (مستوى الكتابة) إلا بعد فهم المخاطر.",
+    "browserTitle": "امتداد المتصفح",
+    "browserDesc": "حمّل الامتداد غير المعبأ من المستودع واتصل باستخدام الرمز أدناه.",
+    "connected": "الامتداد متصل",
+    "disconnected": "الامتداد غير متصل",
+    "listening": "الجسر يعمل",
+    "notListening": "الجسر متوقف",
+    "port": "المنفذ",
+    "token": "رمز الجسر",
+    "copyToken": "نسخ الرمز",
+    "regenerateToken": "إعادة التوليد",
+    "tokenCopied": "تم نسخ الرمز",
+    "tokenRegenerated": "تمت إعادة توليد الرمز — أعد ربط الامتداد",
+    "tokenRegenerateFailed": "تعذّرت إعادة توليد الرمز",
+    "extensionPath": "مجلد الامتداد",
+    "extensionPathHint": "extensions/munder-browser",
+    "desktopTitle": "أذونات سطح المكتب",
+    "desktopDesc": "مطلوبة للتقاط الشاشة والنقر وأتمتة لوحة المفاتيح.",
+    "accessibility": "إمكانية الوصول",
+    "screenCapture": "تسجيل الشاشة",
+    "openAccessibilitySettings": "فتح إعدادات إمكانية الوصول",
+    "openScreenCaptureSettings": "فتح إعدادات تسجيل الشاشة"
+  },
   "devicePicker": {
     "microphone": "الميكروفون",
     "speaker": "السمّاعة",

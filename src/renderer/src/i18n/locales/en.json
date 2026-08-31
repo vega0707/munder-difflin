@@ -940,6 +940,32 @@
       "secretNote": "These servers require an API key or credentials. Off by default — add your credentials and enable after consent."
     }
   },
+  "browserDesktop": {
+    "title": "Browser & desktop control",
+    "desc": "Connect the Chrome extension for browser automation and grant system permissions for full desktop control.",
+    "warning": "Full desktop control lets agents move the pointer, type, and capture the screen without per-action confirmation. Enable the desktop-control MCP server (write tier) only after you understand the risk.",
+    "browserTitle": "Browser extension",
+    "browserDesc": "Load the unpacked extension from the repo and connect using the token below.",
+    "connected": "Extension connected",
+    "disconnected": "Extension not connected",
+    "listening": "Bridge listening",
+    "notListening": "Bridge not running",
+    "port": "Port",
+    "token": "Bridge token",
+    "copyToken": "Copy token",
+    "regenerateToken": "Regenerate",
+    "tokenCopied": "Token copied",
+    "tokenRegenerated": "Token regenerated — reconnect the extension",
+    "tokenRegenerateFailed": "Could not regenerate token",
+    "extensionPath": "Extension folder",
+    "extensionPathHint": "extensions/munder-browser",
+    "desktopTitle": "Desktop permissions",
+    "desktopDesc": "Required for screenshots, clicks, and keyboard automation.",
+    "accessibility": "Accessibility",
+    "screenCapture": "Screen Recording",
+    "openAccessibilitySettings": "Open Accessibility settings",
+    "openScreenCaptureSettings": "Open Screen Recording settings"
+  },
   "devicePicker": {
     "microphone": "Microphone",
     "speaker": "Speaker",

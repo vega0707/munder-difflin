@@ -62,7 +62,8 @@ import {
   WebhookServer,
   type WebhookDispatch, type WebhookEndpointRef, type WebhookInbound, type WebhookTaskStatus
 } from './webhook';
-import { startBrowserBridge, stopBrowserBridge } from './browserBridge';
+import { startBrowserBridge, stopBrowserBridge, getBrowserBridgeStatus } from './browserBridge';
+import { getDesktopPermissionStatus } from './desktopControl';
 import { startAutomationBridge, stopAutomationBridge } from './automationBridge';
 import {
   classifyInboundKind, isAutoAllowed,
@@ -3537,6 +3538,35 @@ ipcMain.handle('config:setAgentTokenCap', (_evt, agentId: unknown, tokenCap: unk
 ipcMain.handle('config:ensureHome', (_evt, path: unknown) => {
   if (typeof path !== 'string' || path.length === 0) return { ok: false, error: 'invalid path' };
   return ensureHarnessHome(path);
+});
+
+// ─── IPC: browser bridge + desktop control (Settings → Connections) ─────────
+ipcMain.handle('browserBridge:status', () => getBrowserBridgeStatus());
+ipcMain.handle('browserBridge:regenerateToken', () => {
+  const token = randomBytes(16).toString('hex');
+  writeConfig({ browserBridgeToken: token });
+  stopBrowserBridge();
+  startBrowserBridge();
+  return { token };
+});
+ipcMain.handle('desktopControl:permissionStatus', () => getDesktopPermissionStatus());
+ipcMain.handle('desktopControl:openAccessibilitySettings', async () => {
+  if (process.platform === 'darwin') {
+    await shell.openExternal(
+      'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'
+    );
+    return;
+  }
+  if (process.platform === 'win32') {
+    await shell.openExternal('ms-settings:privacy-accessibility');
+  }
+});
+ipcMain.handle('desktopControl:openScreenCaptureSettings', async () => {
+  if (process.platform === 'darwin') {
+    await shell.openExternal(
+      'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
+    );
+  }
 });
 
 // Change the harnessHome folder. Because every derived path (hive root, palace,
