@@ -230,14 +230,22 @@ const TOOL_STATION: Record<string, { station: StationKind; carry?: ToolKind }> =
   Read: { station: 'shelf', carry: 'Read' },
   Edit: { station: 'desk', carry: 'Edit' },
   Write: { station: 'desk', carry: 'Write' },
+  MultiEdit: { station: 'desk', carry: 'Edit' },
+  NotebookEdit: { station: 'desk', carry: 'Edit' },
   Bash: { station: 'terminal', carry: 'Bash' },
+  BashOutput: { station: 'terminal', carry: 'Bash' },
   Grep: { station: 'shelf', carry: 'Grep' },
   Glob: { station: 'shelf', carry: 'Glob' },
+  LS: { station: 'shelf', carry: 'Read' },
   WebFetch: { station: 'web', carry: 'WebFetch' },
   WebSearch: { station: 'web', carry: 'WebSearch' },
   TodoWrite: { station: 'board', carry: 'TodoWrite' },
+  TaskCreate: { station: 'board', carry: 'TodoWrite' },
+  TaskUpdate: { station: 'board', carry: 'TodoWrite' },
   // #5A — delegating to a sub-agent reads as "handing off at the outbox".
-  Task: { station: 'mailbox', carry: 'TodoWrite' }
+  Task: { station: 'mailbox', carry: 'TodoWrite' },
+  Skill: { station: 'mcp', carry: 'MCP' },
+  SlashCommand: { station: 'terminal', carry: 'Bash' }
 };
 
 /** Browser-bridge MCP tools (e.g. mcp__munder-browser-bridge__browser_tabs). */
@@ -879,6 +887,9 @@ export function useHive(config: HarnessConfig | null): void {
       // the queue with no escape hatch at all. Idle/draft/picker safety below
       // still applies to manual messages; only the pause is bypassed.
       if (control?.autoDeliveryPaused && !next.manual) return { sent: false };
+      // Ask Me hard gate — same posture as PreToolUse deny: don't nudge an
+      // assignee that is waiting on a human answer (manual "send now" still ok).
+      if (control?.awaitingHuman && !next.manual) return { sent: false };
       // Hold queued messages until the target finishes its boot sequence.
       if ((bootGraceUntil.current[target.id] ?? 0) >= now) return { sent: false };
       // The user owns the prompt: a draft they are writing, or a menu they

@@ -81,6 +81,8 @@ export interface WorkerWakeFacts {
   autoDeliveryPaused: boolean;
   paused: boolean;
   halted: boolean;
+  /** Ask Me hard gate — assignee of a card waiting on the human. */
+  awaitingHuman?: boolean;
 }
 
 export class WorkerWakeWatchdog {
@@ -115,7 +117,7 @@ export class WorkerWakeWatchdog {
     const out: string[] = [];
     for (const f of facts) {
       if (f.isGod || f.inboxCount <= 0 || !f.ptyId) continue;
-      if (f.autoDeliveryPaused || f.paused || f.halted) continue;
+      if (f.autoDeliveryPaused || f.paused || f.halted || f.awaitingHuman) continue;
       if (f.lastOutputAt <= 0) continue; // never produced output → still booting
       if (now - f.lastOutputAt < WORKER_WAKE_IDLE_MS) continue; // mid-turn
       const spawned = this.spawnedAt.get(f.ptyId) ?? 0;

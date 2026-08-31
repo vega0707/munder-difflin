@@ -439,6 +439,16 @@ export interface HarnessConfig {
   /** Bind address when serving. Default 127.0.0.1; set 0.0.0.0 for LAN. */
   seatHubBind?: string;
 
+  /**
+   * Loopback HTTP read surface (`GET /health`, `GET /tasks` on 127.0.0.1).
+   * Default OFF. When enabled without a token, a random token is minted once.
+   */
+  localGatewayEnabled?: boolean;
+  /** Preferred port for LocalGateway; 0 = OS-assigned. Default 0. */
+  localGatewayPort?: number;
+  /** Optional bearer token; empty + enabled ⇒ mint once and persist. */
+  localGatewayToken?: string;
+
   /** Localhost browser bridge (Chrome extension). Token never exported to hire JSON. */
   browserBridgePort?: number;
   /** Random 32-char hex token; generated on first read if missing. Never in hire manifests. */
@@ -518,6 +528,9 @@ const DEFAULTS: HarnessConfig = {
   seatHubListen: false,
   seatHubPort: 3851,
   seatHubBind: '127.0.0.1',
+  localGatewayEnabled: false,
+  localGatewayPort: 0,
+  localGatewayToken: undefined,
   browserBridgePort: 9777
 };
 

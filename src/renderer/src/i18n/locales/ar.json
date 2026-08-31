@@ -61,6 +61,7 @@
   },
   "agentControl": {
     "deliveryPaused": "الرسائل المصفوفة محتجزة (الأرضية كلها)",
+    "awaitingHuman": "بانتظار اسألني — الأدوات مرفوضة",
     "halting": "سيتوقّف بعد هذه الخطوة…",
     "steersQueued": "{{count}} ملاحظة في الانتظار",
     "steerPlaceholder": "أرسل ملاحظة إلى هذا الوكيل… (تصله كسياق في دوره التالي، ولا يُكتب شيء في طرفيته)",
@@ -106,7 +107,16 @@
     "viewAnswersHistory": "افتح تفاصيل المهمة مع سجلّ الأسئلة والأجوبة كاملًا",
     "blockingDownstream": "يعطّل {{count}} مهمة لاحقة",
     "blockingDownstreamPlural": "يعطّل {{count}} مهام لاحقة",
-    "more": "… +{{count}} أخرى"
+    "more": "… +{{count}} أخرى",
+    "gateBanner": "{{count}} مُسنَد/مُسنَدين مقفولون — تُرفض الأدوات حتى تجيب أو تتجاهل أدناه. ({{agents}})"
+  },
+  "hivePulse": {
+    "title": "نبض الأرضية",
+    "askMe": "اسألني مفتوح",
+    "gated": "مقفول",
+    "breakers": "قواطع مفتوحة",
+    "openAskMe": "افتح اسألني",
+    "quiet": "الأرضية هادئة — لا بوابات بشرية ولا قواطع مفتوحة."
   },
   "agentStrip": {
     "privateNote": "ملاحظة خاصة · {{name}}",
@@ -1406,6 +1416,8 @@
     "dismissAria": "تجاهل المهمة",
     "taskTitle": "المهمة",
     "unassigned": "غير مُسنَدة",
+    "filterAssignee": "المُسنَد",
+    "filterAll": "الكل",
     "noDescription": "(لا وصف على هذه البطاقة)",
     "humanQA": "أسئلة وأجوبة بشرية",
     "awaitingAnswer": "بانتظار إجابتك — تبويب اسألني",

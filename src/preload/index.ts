@@ -502,6 +502,8 @@ export interface AgentControlSnapshot {
   paused: boolean;
   halted: boolean;
   autoDeliveryPaused: boolean;
+  /** True while this agent is assignee of a kanban card waiting on Ask Me. */
+  awaitingHuman: boolean;
   gatedTools: string[];
   pendingSteers: number;
 }

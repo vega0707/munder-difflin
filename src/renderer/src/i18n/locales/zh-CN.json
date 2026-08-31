@@ -61,6 +61,7 @@
   },
   "agentControl": {
     "deliveryPaused": "队列消息已暂停投递（整个楼层）",
+    "awaitingHuman": "等待「问我」——工具已拒绝",
     "halting": "正在此步骤结束后停止…",
     "steersQueued": "有 {{count}} 条笔记等待处理",
     "steerPlaceholder": "给该智能体发送一条笔记…（在其下一轮作为上下文到达，不会输入到它的终端）",
@@ -106,7 +107,16 @@
     "viewAnswersHistory": "打开包含完整问答历史的任务详情",
     "blockingDownstream": "阻塞 {{count}} 个下游任务",
     "blockingDownstreamPlural": "阻塞 {{count}} 个下游任务",
-    "more": "… 还有 {{count}} 个"
+    "more": "… 还有 {{count}} 个",
+    "gateBanner": "{{count}} 名负责人已硬闸停——在下方回答或忽略前，工具调用将被拒绝。（{{agents}}）"
+  },
+  "hivePulse": {
+    "title": "楼层脉搏",
+    "askMe": "待回答",
+    "gated": "硬闸停",
+    "breakers": "断路器开",
+    "openAskMe": "打开「问我」",
+    "quiet": "楼层清静——无人闸、无断路器。"
   },
   "agentStrip": {
     "privateNote": "私人笔记 · {{name}}",
@@ -1406,6 +1416,8 @@
     "dismissAria": "忽略任务",
     "taskTitle": "任务",
     "unassigned": "未分配",
+    "filterAssignee": "负责人",
+    "filterAll": "全部",
     "noDescription": "（此卡片没有描述）",
     "humanQA": "人工问答",
     "awaitingAnswer": "等待你的回答——「问我」标签页",

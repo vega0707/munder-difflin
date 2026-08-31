@@ -29,6 +29,7 @@ interface Snapshot {
   paused: boolean;
   halted: boolean;
   autoDeliveryPaused: boolean;
+  awaitingHuman?: boolean;
   gatedTools: string[];
   pendingSteers: number;
 }
@@ -108,6 +109,9 @@ export function AgentControlStrip({ agentId }: { agentId: string }) {
         <AgentHoldButton agentId={agentId} />
         {/* v0.3.4: the auto-delivery switch moved to the god's Command Center
             header — ONE floor-wide control instead of a per-agent toggle. */}
+        {snap?.awaitingHuman && (
+          <span style={{ fontSize: 11, color: 'var(--cth-coral)' }}>{t('agentControl.awaitingHuman')}</span>
+        )}
         {snap?.autoDeliveryPaused && (
           <span style={{ fontSize: 11, color: 'var(--cth-ink-500)' }}>{t('agentControl.deliveryPaused')}</span>
         )}

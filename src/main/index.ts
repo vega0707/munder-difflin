@@ -25,6 +25,8 @@ import {
   getLogGraph, getCommitFiles, getFileAtRev, compareRefs, listWorktrees, checkoutRef
 } from './git';
 import { HiveManager, type AgentMeta, type HiveMessage, type HiveTask } from './hive';
+import { agentsAwaitingHuman, syncAwaitingHuman } from './humanGate';
+import { LocalGateway, mintGatewayToken } from './localGateway';
 import { HookServer, HookHub } from './hooks';
 import { CircuitBreaker, type BreakerInput } from './breaker';
 import type { UsageProvider } from './usage';
@@ -418,7 +420,90 @@ function bindActiveHive(next: HiveManager, _previousId: string | null): void {
     appPath: app.getAppPath()
   });
   hive.setOrchestratorMaySpawn(readConfig().orchestratorMaySpawn === true);
+  hive.setOnTasksCommitted((tasks) => {
+    applyHumanGateFromTasks(tasks);
+  });
+  // Catch up after floor switch / restore.
+  try {
+    const ledger = hive.tasks() as { tasks?: HiveTask[] };
+    applyHumanGateFromTasks(Array.isArray(ledger?.tasks) ? ledger.tasks : []);
+  } catch { /* hive may be empty */ }
 }
+
+/** Hard-gate assignees of Ask Me cards; emit roster of gated ids for the UI. */
+function applyHumanGateFromTasks(tasks: HiveTask[]): void {
+  const waiting = agentsAwaitingHuman(tasks);
+  let known: string[] = [];
+  try {
+    const reg = hive.registry();
+    known = reg?.agents ? Object.keys(reg.agents) : [];
+  } catch { known = []; }
+  syncAwaitingHuman(control, waiting, known);
+  try {
+    emitToRenderer('hive:awaitingHuman', { agentIds: [...waiting] });
+  } catch { /* no window */ }
+}
+
+let localGateway: LocalGateway | null = null;
+let localGatewaySig = '';
+
+async function startLocalGateway(): Promise<void> {
+  const cfg = readConfig();
+  const enabled = cfg.localGatewayEnabled === true;
+  if (!enabled) {
+    if (localGateway) {
+      stopLocalGateway();
+      localGatewaySig = '';
+    }
+    return;
+  }
+  let token = (cfg.localGatewayToken ?? '').trim();
+  if (!token) {
+    token = mintGatewayToken();
+    // Persist once; onConfigWritten will re-enter with the token set.
+    writeConfig({ localGatewayToken: token });
+    console.log('[local-gateway] minted token (copy from config.localGatewayToken)');
+    return;
+  }
+  const port = cfg.localGatewayPort ?? 0;
+  const sig = `1|${port}|${token}`;
+  if (sig === localGatewaySig && localGateway) return;
+
+  localGateway?.stop();
+  localGateway = null;
+  const gw = new LocalGateway({
+    port,
+    token,
+    getTasks: () => {
+      try {
+        const ledger = hive.tasks() as { tasks?: HiveTask[] };
+        return Array.isArray(ledger?.tasks) ? ledger.tasks : [];
+      } catch { return []; }
+    },
+    getHealthExtra: () => {
+      try {
+        const ledger = hive.tasks() as { tasks?: HiveTask[] };
+        return { awaitingHuman: [...agentsAwaitingHuman(Array.isArray(ledger?.tasks) ? ledger.tasks : [])] };
+      } catch { return { awaitingHuman: [] as string[] }; }
+    }
+  });
+  const r = await gw.start();
+  if (!r.ok) {
+    console.error('[local-gateway] start failed:', r.error);
+    localGatewaySig = '';
+    return;
+  }
+  localGateway = gw;
+  localGatewaySig = sig;
+  console.log(`[local-gateway] http://127.0.0.1:${r.port}  (Bearer token required)`);
+}
+
+function stopLocalGateway(): void {
+  try { localGateway?.stop(); } catch { /* noop */ }
+  localGateway = null;
+  localGatewaySig = '';
+}
+
 const projectRegistry = new ProjectRegistry({
   persist,
   getHarnessHome: () => readConfig().harnessHome,
@@ -4478,6 +4563,7 @@ function teardownAndQuit(): void {
   try { stopWebhookServer(); } catch (e) { console.error('[quit] webhook.stop:', e); }
   try { stopAutomationBridge(); } catch (e) { console.error('[quit] automationBridge.stop:', e); }
   try { stopBrowserBridge(); } catch (e) { console.error('[quit] browserBridge.stop:', e); }
+  try { stopLocalGateway(); } catch (e) { console.error('[quit] localGateway.stop:', e); }
   try { memory.stop(); } catch (e) { console.error('[quit] memory.stop:', e); }
   try { reflector.stop(); } catch (e) { console.error('[quit] reflector.stop:', e); }
   try { stopSeatHeartbeat(); } catch (e) { console.error('[quit] seat heartbeat:', e); }
@@ -5890,7 +5976,8 @@ function runWorkerWakeBeat(): void {
       inboxCount: hive.inbox(agentId).length,
       autoDeliveryPaused: snap.autoDeliveryPaused,
       paused: snap.paused,
-      halted: snap.halted
+      halted: snap.halted,
+      awaitingHuman: snap.awaitingHuman
     });
   }
   for (const agentId of workerWake.decide(facts, now)) {
@@ -6055,6 +6142,7 @@ app.whenReady().then(() => {
   bootstrapHiveServices();
   try { startBrowserBridge(); } catch (e) { console.error('[browser-bridge] start failed:', e); }
   try { startAutomationBridge(); } catch (e) { console.error('[automation-bridge] start failed:', e); }
+  void startLocalGateway();
   // Survive sleep/lock. macOS freezes libuv timers during true system sleep, so a
   // locked/idle/slept Mac stops firing schedules and can wedge PTYs. On wake we
   // re-arm the scheduler (catching up missed missions ONCE) + beats + keep-awake,
@@ -6112,6 +6200,7 @@ onConfigWritten((config) => {
     if (w.isDestroyed() || w.webContents.isDestroyed()) continue;
     w.webContents.send('config:changed', config);
   }
+  void startLocalGateway().catch((e) => console.error('[local-gateway] restart failed:', e));
 });
 
 app.on('window-all-closed', () => {
