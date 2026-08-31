@@ -6,7 +6,8 @@ const loadTs = require('./load-ts.cjs');
 
 const {
   resolveSttProvider,
-  STT_PROVIDERS
+  STT_PROVIDERS,
+  isSttProviderId
 } = loadTs('src/shared/sttProviders.ts');
 
 test('unknown or missing provider falls back to groq', () => {
@@ -19,6 +20,13 @@ test('siliconflow resolves to the China-reachable transcription URL', () => {
   assert.equal(p.id, 'siliconflow');
   assert.equal(p.endpoint, 'https://api.siliconflow.cn/v1/audio/transcriptions');
   assert.equal(p.defaultModel, 'FunAudioLLM/SenseVoiceSmall');
+});
+
+test('ctrip is a first-class provider id', () => {
+  assert.equal(isSttProviderId('ctrip'), true);
+  const p = resolveSttProvider('ctrip');
+  assert.equal(p.id, 'ctrip');
+  assert.equal(p.kind, 'ctrip-broker');
 });
 
 test('siliconflow is a first-class Voice setting', () => {
