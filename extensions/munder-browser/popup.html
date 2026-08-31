@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Munder Browser Bridge</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      width: 320px;
+      padding: 16px;
+      color: #1a1a1a;
+      background: #fafafa;
+    }
+    h1 {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      margin-bottom: 4px;
+      color: #555;
+    }
+    input[type="text"],
+    input[type="number"] {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      font-size: 13px;
+      margin-bottom: 12px;
+    }
+    input:focus {
+      outline: none;
+      border-color: #6495ed;
+      box-shadow: 0 0 0 2px rgba(100, 149, 237, 0.2);
+    }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px;
+      border-radius: 8px;
+      background: #eee;
+      margin-bottom: 12px;
+      font-size: 13px;
+    }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .dot.connected { background: #22c55e; }
+    .dot.connecting { background: #eab308; animation: pulse 1s infinite; }
+    .dot.disconnected { background: #ef4444; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    button {
+      width: 100%;
+      padding: 10px;
+      border: none;
+      border-radius: 6px;
+      background: #6495ed;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    button:hover { background: #4a7fd4; }
+    .hint {
+      margin-top: 10px;
+      font-size: 11px;
+      color: #888;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <h1>Munder Browser Bridge</h1>
+
+  <div class="status" id="statusBar">
+    <span class="dot disconnected" id="statusDot"></span>
+    <span id="statusText">Disconnected</span>
+  </div>
+
+  <label for="port">Bridge port</label>
+  <input type="number" id="port" value="9777" min="1" max="65535" />
+
+  <label for="token">Bridge token</label>
+  <input type="text" id="token" placeholder="Paste token from Munder Settings" autocomplete="off" />
+
+  <button id="save">Save &amp; Connect</button>
+
+  <p class="hint">
+    Token must match the value in Munder harness config. The extension connects to
+    <code>ws://127.0.0.1:&lt;port&gt;</code> only.
+  </p>
+
+  <script src="popup.js"></script>
+</body>
+</html>
