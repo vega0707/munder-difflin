@@ -29,7 +29,37 @@ export interface AutomationResponse {
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+const SERVICE_MCP_ID = {
+  browser: 'browser-bridge',
+  desktop: 'desktop-control'
+} as const;
+
+type McpDefaultsMap = { [id: string]: { enabled: boolean } } | undefined;
+
 let server: Server | null = null;
+/** Test hook: when non-null, overrides readConfig().mcpDefaults for consent checks. */
+let testMcpDefaultsOverride: McpDefaultsMap | null | undefined = undefined;
+
+export function _setMcpDefaultsForTest(map: McpDefaultsMap | null): void {
+  testMcpDefaultsOverride = map;
+}
+
+export function _resetMcpDefaultsForTest(): void {
+  testMcpDefaultsOverride = undefined;
+}
+
+function readMcpDefaults(): McpDefaultsMap {
+  if (testMcpDefaultsOverride !== undefined) return testMcpDefaultsOverride ?? undefined;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { readConfig } = require('./config') as typeof import('./config');
+  return readConfig().mcpDefaults;
+}
+
+export function isAutomationServiceConsented(service: 'browser' | 'desktop'): boolean {
+  const mcpDefaults = readMcpDefaults();
+  const catalogId = SERVICE_MCP_ID[service];
+  return mcpDefaults?.[catalogId]?.enabled === true;
+}
 
 function readHarnessHome(): string | null {
   // Lazy require keeps plain-node tests off Electron config unless production path.
@@ -64,7 +94,20 @@ function badRequest(message: string): AutomationResponse {
   };
 }
 
-async function dispatch(req: AutomationRequest): Promise<AutomationResponse> {
+function consentDenied(service: 'browser' | 'desktop', id: string): AutomationResponse {
+  const catalogId = SERVICE_MCP_ID[service];
+  return {
+    id,
+    ok: false,
+    error: {
+      code: 'CONSENT_DENIED',
+      message: `${service} automation requires ${catalogId} MCP consent (mcpDefaults.${catalogId}.enabled === true)`
+    }
+  };
+}
+
+/** Dispatch one automation request (exported for unit tests). */
+export async function dispatchAutomationRequest(req: AutomationRequest): Promise<AutomationResponse> {
   const id = req.id ?? randomUUID();
   if (req.service !== 'browser' && req.service !== 'desktop') {
     return { ...badRequest(`unknown service: ${String(req.service)}`), id };
@@ -74,6 +117,10 @@ async function dispatch(req: AutomationRequest): Promise<AutomationResponse> {
   }
   if (req.params !== undefined && (typeof req.params !== 'object' || req.params === null || Array.isArray(req.params))) {
     return { ...badRequest('params must be an object'), id };
+  }
+
+  if (!isAutomationServiceConsented(req.service)) {
+    return consentDenied(req.service, id);
   }
 
   if (req.service === 'desktop') {
@@ -116,7 +163,7 @@ function handleConnection(conn: import('node:net').Socket): void {
         conn.end(JSON.stringify(badRequest('invalid JSON request')) + '\n');
         return;
       }
-      const res = await dispatch(req);
+      const res = await dispatchAutomationRequest(req);
       conn.end(JSON.stringify(res) + '\n');
     })().catch((e) => {
       conn.end(JSON.stringify({
