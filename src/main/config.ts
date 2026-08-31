@@ -1,4 +1,5 @@
 import { app } from 'electron';
+import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
@@ -437,6 +438,11 @@ export interface HarnessConfig {
   seatHubPort?: number;
   /** Bind address when serving. Default 127.0.0.1; set 0.0.0.0 for LAN. */
   seatHubBind?: string;
+
+  /** Localhost browser bridge (Chrome extension). Token never exported to hire JSON. */
+  browserBridgePort?: number;
+  /** Random 32-char hex token; generated on first read if missing. Never in hire manifests. */
+  browserBridgeToken?: string;
 }
 
 const DEFAULTS: HarnessConfig = {
@@ -511,7 +517,8 @@ const DEFAULTS: HarnessConfig = {
   seatHubToken: '',
   seatHubListen: false,
   seatHubPort: 3851,
-  seatHubBind: '127.0.0.1'
+  seatHubBind: '127.0.0.1',
+  browserBridgePort: 9777
 };
 
 function configPath(): string {
@@ -612,18 +619,27 @@ function migrateTriggersV1(cfg: HarnessConfig): HarnessConfig {
   }
 }
 
+function withBrowserBridgeToken(cfg: HarnessConfig, persist: boolean): HarnessConfig {
+  if (cfg.browserBridgeToken) return cfg;
+  const next = { ...cfg, browserBridgeToken: randomBytes(16).toString('hex') };
+  return persist ? persistConfig(next) : next;
+}
+
 export function readConfig(): HarnessConfig {
   const p = configPath();
   // No file yet = a first run with nothing to migrate; the defaults ARE the
   // post-migration shape. Deliberately does not persist — a bare read must not
   // conjure a config.json before onboarding has written one.
-  if (!existsSync(p)) return withTriggerDefaults({ ...DEFAULTS });
+  if (!existsSync(p)) return withBrowserBridgeToken(withTriggerDefaults({ ...DEFAULTS }), false);
   try {
     const raw = readFileSync(p, 'utf8');
     const parsed = JSON.parse(raw);
-    return normalizeStoredHomes(migrateTriggersV1(withTriggerDefaults({ ...DEFAULTS, ...parsed })));
+    return withBrowserBridgeToken(
+      normalizeStoredHomes(migrateTriggersV1(withTriggerDefaults({ ...DEFAULTS, ...parsed }))),
+      true
+    );
   } catch {
-    return withTriggerDefaults({ ...DEFAULTS });
+    return withBrowserBridgeToken(withTriggerDefaults({ ...DEFAULTS }), false);
   }
 }
 
