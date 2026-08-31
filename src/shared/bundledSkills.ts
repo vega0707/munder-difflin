@@ -20,7 +20,9 @@ export const BUNDLED_SKILL_IDS = [
   'last30Days',
   'md-audit',
   'md-hive-sync',
-  'md-fetch-summarize'
+  'md-fetch-summarize',
+  'browser-automation',
+  'desktop-automation'
 ] as const;
 
 export type BundledSkillId = (typeof BUNDLED_SKILL_IDS)[number];
