@@ -109,7 +109,6 @@ function handleExtensionMessage(raw: string): void {
 
 function attachExtension(ws: WsSocket): void {
   extensionWs = ws;
-  ws.on('message', (data: WsRawData) => handleExtensionMessage(String(data)));
   ws.on('close', () => {
     if (extensionWs === ws) clearExtensionSession();
   });
@@ -159,9 +158,6 @@ export function startBrowserBridge(): void {
         return;
       }
       handleExtensionMessage(raw);
-    });
-    ws.on('close', () => {
-      if (extensionWs === ws) clearExtensionSession();
     });
   });
   server.on('error', (err: Error) => {

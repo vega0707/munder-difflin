@@ -2,6 +2,7 @@
 
 const { describe, it, after } = require('node:test');
 const assert = require('node:assert/strict');
+const WebSocket = require('ws');
 const loadTs = require('./load-ts.cjs');
 const { parseBridgeMessage, isValidToken } = require('../out/main/browserBridgeProtocol.cjs');
 
@@ -14,10 +15,52 @@ async function loadBridge() {
   bridge.stopBrowserBridge();
   bridge.startBrowserBridge();
   for (let i = 0; i < 50; i++) {
-    if (bridge.getBrowserBridgeStatus().listening) break;
+    const st = bridge.getBrowserBridgeStatus();
+    if (st.listening && st.port > 0) break;
     await new Promise((r) => setTimeout(r, 10));
   }
   return bridge;
+}
+
+function bridgeUrl(bridge) {
+  const { port } = bridge.getBrowserBridgeStatus();
+  return `ws://127.0.0.1:${port}`;
+}
+
+function helloPayload(token = TEST_TOKEN) {
+  return JSON.stringify({ type: 'hello', token, extensionVersion: '0.1.0' });
+}
+
+function openClient(bridge) {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(bridgeUrl(bridge));
+    ws.on('error', reject);
+    ws.on('open', () => resolve(ws));
+  });
+}
+
+function waitForClose(ws, ms = 3000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timed out waiting for close')), ms);
+    ws.on('close', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+async function connectAndHello(bridge, { token = TEST_TOKEN } = {}) {
+  const ws = new WebSocket(bridgeUrl(bridge));
+  await new Promise((resolve, reject) => {
+    ws.on('error', reject);
+    ws.on('open', resolve);
+  });
+  ws.send(helloPayload(token));
+  for (let i = 0; i < 30; i++) {
+    if (bridge.getBrowserBridgeStatus().extensionConnected) return ws;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  throw new Error('extension not attached after hello');
 }
 
 after(() => {
@@ -41,10 +84,50 @@ describe('browserBridgeProtocol', () => {
 });
 
 describe('browserBridge server', () => {
+  /** @type {ReturnType<typeof loadTs>} */
+  let bridge;
+
+  after(async () => {
+    if (bridge) bridge.stopBrowserBridge();
+  });
+
   it('invokeBrowserTool rejects when extension offline', async () => {
-    const { invokeBrowserTool } = await loadBridge();
+    bridge = await loadBridge();
     await assert.rejects(
-      () => invokeBrowserTool('browser_tabs', {}),
+      () => bridge.invokeBrowserTool('browser_tabs', {}),
+      (err) => err.code === 'BROWSER_BRIDGE_DISCONNECTED'
+    );
+  });
+
+  it('closes connection on wrong token and does not attach extension', async () => {
+    bridge = await loadBridge();
+    const ws = await openClient(bridge);
+    const closed = waitForClose(ws);
+    ws.send(helloPayload('wrong-token-thirty-two-chars-xxxxx'));
+    await closed;
+    assert.equal(bridge.getBrowserBridgeStatus().extensionConnected, false);
+  });
+
+  it('rejects duplicate extension while first is connected', async () => {
+    bridge = await loadBridge();
+    const first = await connectAndHello(bridge);
+    assert.equal(bridge.getBrowserBridgeStatus().extensionConnected, true);
+
+    const duplicate = await openClient(bridge);
+    const duplicateClosed = waitForClose(duplicate);
+    duplicate.send(helloPayload());
+    await duplicateClosed;
+    assert.equal(bridge.getBrowserBridgeStatus().extensionConnected, true);
+    first.close();
+  });
+
+  it('rejects pending RPC when extension disconnects mid-flight', async () => {
+    bridge = await loadBridge();
+    const ext = await connectAndHello(bridge);
+    const pending = bridge.invokeBrowserTool('browser_tabs', {});
+    ext.close();
+    await assert.rejects(
+      pending,
       (err) => err.code === 'BROWSER_BRIDGE_DISCONNECTED'
     );
   });
