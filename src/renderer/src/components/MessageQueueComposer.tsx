@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { PixelButton } from './PixelButton';
 import { Icon } from './Icon';
+import { SkillComposerInput } from './SkillComposerInput';
 import { useStore, type Agent, type QueuedMessage } from '@/store/store';
 import { clearTerminalDraft, dismissTerminalPicker, terminalAutomationBlockFor } from './terminalPool';
 import type { TerminalAutomationBlock } from './terminalAutomation';
@@ -343,11 +344,12 @@ export function MessageQueueComposer({ agent }: MessageQueueComposerProps) {
       {/* Composer — full-width input above a single tidy control bar (cc-ui-polish),
           with file/image attachment chips + paste-to-attach (rich-composer). */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <textarea
+        <SkillComposerInput
+          agentCwd={agent.cwd}
           dir={rtl ? 'auto' : undefined}
           className="cth-input"
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={setText}
           onKeyDown={onKey}
           onPaste={onPaste}
           rows={5}
@@ -355,18 +357,10 @@ export function MessageQueueComposer({ agent }: MessageQueueComposerProps) {
           style={{
             width: '100%',
             resize: 'vertical',
-            // Track the terminal's zoom (Cmd +/- or the terminal's own zoom
-            // buttons) instead of a hardcoded 13px. On a large display the
-            // terminal text scaled up while this box stayed tiny; box height is
-            // derived from the same size so the visible line count is stable.
             minHeight: composerLineHeight * 5 + 14,
             maxHeight: composerLineHeight * 18,
-            padding: '6px 8px',
             background: 'var(--cth-paper-100)',
             border: 'none',
-            // Border lives in .cth-input so :focus can change it — an inline
-            // boxShadow here would outrank the stylesheet and the focus state
-            // would silently never apply.
             fontFamily: 'var(--cth-font-mono)',
             fontSize: composerFontSize, lineHeight: `${composerLineHeight}px`,
             color: 'var(--cth-ink-900)',

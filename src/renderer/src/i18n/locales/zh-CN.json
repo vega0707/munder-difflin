@@ -1426,7 +1426,16 @@
     "ffCreateKey": "在以下地址免费创建密钥",
     "ffPasteKey": "粘贴到设置 → 语音（选硅基流动或 Groq，然后保存）",
     "ffClickOrHold": "点击「语音」，或按住右侧 Option 键说话",
-    "ffHoldHint": "单独按住一会儿即可开始；松开后转写到编辑器，发送前可修改。两个 Option 键都可以，Option+按键组合仍会原样到达终端。"
+    "ffHoldHint": "单独按住一会儿即可开始；松开后转写到编辑器，发送前可修改。两个 Option 键都可以，Option+按键组合仍会原样到达终端。",
+    "slashMenu": {
+      "label": "技能",
+      "heading": "技能",
+      "empty": "没有匹配的技能",
+      "more": "还有 {{count}} 个…",
+      "scopeBundled": "内置",
+      "scopeUser": "全局",
+      "scopeProject": "项目"
+    }
   },
   "idePanel": {
     "workspace": "{{name}} 的工作区",

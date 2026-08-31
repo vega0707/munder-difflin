@@ -1426,7 +1426,16 @@
     "ffCreateKey": "Create a free key at",
     "ffPasteKey": "Paste it into Settings → Voice (pick SiliconFlow or Groq, then save)",
     "ffClickOrHold": "Click voice, or hold the right Option key to talk",
-    "ffHoldHint": "Hold it ALONE for a moment to start; release to transcribe into the composer, where you can edit before sending. Either Option key works, and Option+key combos still reach the terminal untouched."
+    "ffHoldHint": "Hold it ALONE for a moment to start; release to transcribe into the composer, where you can edit before sending. Either Option key works, and Option+key combos still reach the terminal untouched.",
+    "slashMenu": {
+      "label": "Skills",
+      "heading": "Skills",
+      "empty": "No matching skills",
+      "more": "+{{count}} more…",
+      "scopeBundled": "bundled",
+      "scopeUser": "global",
+      "scopeProject": "project"
+    }
   },
   "idePanel": {
     "workspace": "{{name}}'s workspace",
