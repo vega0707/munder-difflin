@@ -64,5 +64,6 @@
 
 ### Task 7: Verify + commit + PR
 
-- [ ] typecheck + focused tests
-- [ ] Push branch + PR with Before/After notes
+- [x] typecheck + focused tests
+- [x] Push branch + PR with Before/After notes
+  (PR #4: https://github.com/vega0707/munder-difflin/pull/4)
