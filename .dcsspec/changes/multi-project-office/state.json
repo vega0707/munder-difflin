@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "ticketKey": null,
+  "idev": null,
+  "title": "多项目办公室架构",
+  "changeName": "multi-project-office",
+  "changeId": "multi-project-office",
+  "branch": "main",
+  "repos": [
+    "munder-difflin"
+  ],
+  "primaryRepo": "munder-difflin",
+  "openspecChange": "multi-project-office",
+  "specPath": [
+    "openspec/changes/multi-project-office/design.md"
+  ],
+  "planPath": [
+    "docs/superpowers/plans/2026-08-31-multi-project-office.md"
+  ],
+  "dcsspecDir": "docs/dcsspec/multi-project-office",
+  "currentStage": "design",
+  "stages": {
+    "open": {
+      "status": "done"
+    },
+    "design": {
+      "status": "in_progress"
+    }
+  },
+  "gates": {
+    "brainstormingDone": true,
+    "acceptanceCasesPlanned": true,
+    "planReviewPassed": true
+  },
+  "notes": "已决议：1 项目 = 1 楼层（独立地图），标签页切换；项目 = 独立 hive 数据目录 + 灵活 cwd；boss = iClaw lead 角色（可换人）；agent 级独立 MCP/skill；全局模板参考 iClaw Skill；并发活跃 agent 限制 = 5，非活跃项目暂停 PTY；Phase 1 只做多项目数据模型 + 标签页切换。design 补充锁定：agentId 全局唯一；HiveManager 保持 getter、语义改 projectRoot；旧目录改名为 hive.pre-migrate 不立刻删；满 5 个 agent 仍允许切走，仅目标恢复后超 5 才拒；无 AREX，验收为 node:test。"
+}

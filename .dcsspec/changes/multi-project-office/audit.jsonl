@@ -1,0 +1,2 @@
+{"t": "2026-08-31T08:12:19Z", "event": "gate.set", "gate": "acceptanceCasesPlanned", "value": "True"}
+{"t": "2026-08-31T08:12:19Z", "event": "gate.set", "gate": "planReviewPassed", "value": "True"}
