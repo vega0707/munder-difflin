@@ -261,10 +261,12 @@ export function App() {
     return <OnboardingWizard onComplete={(next) => { setConfig(next); setHiveOpened(true); }} />;
   }
 
-  // Launch-time hive picker: on reopen, let the user open their current hive,
-  // switch to a recent one, or open/create another. Skipped right after onboarding
-  // and right after a switch-relaunch (see hiveOpened init).
-  if (!hiveOpened) {
+  // Launch-time hive picker: only shown when there is NO harness home yet (a
+  // fresh install). Once a hive is configured, reopen straight into it — a
+  // single-workspace user should not be re-asked every launch. (Multi-hive
+  // switching remains available from Settings; the picker still covers the
+  // no-config case and the post-onboarding path above.)
+  if (!config.harnessHome) {
     return <HivePicker config={config} onOpenCurrent={() => setHiveOpened(true)} />;
   }
 
