@@ -53,6 +53,46 @@ export function readCxbAsrToken(env?: NodeJS.ProcessEnv): string | undefined {
   return token || undefined;
 }
 
+/**
+ * If `CXB_ASR_TOKEN` is unset, load it from a gitignored `.env.local` (KEY=VALUE
+ * lines). electron-vite only auto-injects VITE_/MAIN_VITE_ prefixes, so unprefixed
+ * secrets need this. Never overwrites an already-set env var. Never logs the value.
+ */
+export function loadCxbAsrTokenFromEnvFile(
+  filePath: string,
+  env: NodeJS.ProcessEnv = process.env,
+  readFile: (path: string, enc: 'utf8') => string = (p, enc) =>
+    // Lazy require so freeflow stays free of top-level electron; callers pass fs in tests.
+    require('node:fs').readFileSync(p, enc)
+): boolean {
+  if (env.CXB_ASR_TOKEN?.trim()) return false;
+  let text: string;
+  try {
+    text = readFile(filePath, 'utf8');
+  } catch {
+    return false;
+  }
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const eq = line.indexOf('=');
+    if (eq <= 0) continue;
+    const key = line.slice(0, eq).trim();
+    if (key !== 'CXB_ASR_TOKEN') continue;
+    let val = line.slice(eq + 1).trim();
+    if (
+      (val.startsWith('"') && val.endsWith('"')) ||
+      (val.startsWith("'") && val.endsWith("'"))
+    ) {
+      val = val.slice(1, -1);
+    }
+    if (!val) return false;
+    env.CXB_ASR_TOKEN = val;
+    return true;
+  }
+  return false;
+}
+
 export interface CtripAutoselectConfig {
   freeflowProvider?: 'groq' | 'siliconflow' | 'ctrip' | null;
   freeflowCtripAutoselected?: boolean;

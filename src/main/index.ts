@@ -71,7 +71,13 @@ import {
 import {
   appendTriggerHistory, clearTriggerHistory, listTriggerHistory, updateTriggerHistory
 } from './triggerHistory';
-import { readCxbAsrToken, shouldAutoselectCtrip, transcribeWithCtrip, transcribeWithGroq } from './freeflow';
+import {
+  loadCxbAsrTokenFromEnvFile,
+  readCxbAsrToken,
+  shouldAutoselectCtrip,
+  transcribeWithCtrip,
+  transcribeWithGroq
+} from './freeflow';
 import { resolveSttProvider, isSttProviderId } from '../shared/sttProviders';
 import { registerRealtimeIpc } from './realtime';
 import { registerRealtimeActionIpc } from './realtimeActions';
@@ -5044,6 +5050,7 @@ ipcMain.handle('freeflow:setConfig', (_evt, patch: unknown) => {
 
 /** Whether CXB_ASR_TOKEN is set in main's environment (never returns the token). */
 ipcMain.handle('freeflow:ctripTokenPresent', () => {
+  loadCxbAsrTokenFromEnvFile(join(process.cwd(), '.env.local'));
   return { present: !!readCxbAsrToken() };
 });
 
@@ -5063,6 +5070,7 @@ ipcMain.handle('freeflow:transcribe', async (_evt, arg: unknown) => {
   const mimeType = typeof a.mimeType === 'string' ? a.mimeType : undefined;
 
   if (stt.id === 'ctrip') {
+    loadCxbAsrTokenFromEnvFile(join(process.cwd(), '.env.local'));
     const token = readCxbAsrToken();
     if (!token) return { ok: false, error: 'set CXB_ASR_TOKEN environment variable' };
     const out = await transcribeWithCtrip({
@@ -5973,6 +5981,8 @@ app.whenReady().then(() => {
   // One-time Ctrip ASR bootstrap: when CXB_ASR_TOKEN is present and the user
   // has not picked another STT backend, default Free Flow to the corp broker.
   {
+    // electron-vite does not inject unprefixed .env.local keys — load ours if unset.
+    loadCxbAsrTokenFromEnvFile(join(process.cwd(), '.env.local'));
     const cfg = readConfig();
     const tokenPresent = !!readCxbAsrToken();
     if (shouldAutoselectCtrip(cfg, tokenPresent)) {

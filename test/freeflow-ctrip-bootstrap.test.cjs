@@ -47,3 +47,23 @@ test('no token → no autoselect', () => {
     false
   );
 });
+
+test('loadCxbAsrTokenFromEnvFile sets CXB_ASR_TOKEN from .env.local text', () => {
+  const { loadCxbAsrTokenFromEnvFile, readCxbAsrToken } = loadTs('src/main/freeflow.ts');
+  const env = {};
+  const ok = loadCxbAsrTokenFromEnvFile(
+    '/fake/.env.local',
+    env,
+    () => '# comment\nFOO=bar\nCXB_ASR_TOKEN=cxb_tok_test_value_here\n'
+  );
+  assert.equal(ok, true);
+  assert.equal(readCxbAsrToken(env), 'cxb_tok_test_value_here');
+});
+
+test('loadCxbAsrTokenFromEnvFile does not overwrite existing env', () => {
+  const { loadCxbAsrTokenFromEnvFile } = loadTs('src/main/freeflow.ts');
+  const env = { CXB_ASR_TOKEN: 'already' };
+  const ok = loadCxbAsrTokenFromEnvFile('/fake/.env.local', env, () => 'CXB_ASR_TOKEN=new\n');
+  assert.equal(ok, false);
+  assert.equal(env.CXB_ASR_TOKEN, 'already');
+});
