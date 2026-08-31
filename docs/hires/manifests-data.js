@@ -696,7 +696,21 @@ window.HIRES_DATA = [
       "isolate": false,
       "tokenCap": 800000,
       "author": "Agent Gallery",
-      "homepage": "https://github.com/chaitanyagiri/munder-difflin"
+      "homepage": "https://github.com/chaitanyagiri/munder-difflin",
+      "skills": [
+        "md-hive-sync",
+        "md-fetch-summarize",
+        "temporal",
+        "today"
+      ],
+      "mcpServers": [
+        "sequential-thinking",
+        "time",
+        "fetch",
+        "filesystem",
+        "git",
+        "search-with-key"
+      ]
     },
     "baseProvider": "claude",
     "variants": {
@@ -720,7 +734,21 @@ window.HIRES_DATA = [
           "isolate": false,
           "tokenCap": 800000,
           "author": "Agent Gallery",
-          "homepage": "https://github.com/chaitanyagiri/munder-difflin"
+          "homepage": "https://github.com/chaitanyagiri/munder-difflin",
+          "skills": [
+            "md-hive-sync",
+            "md-fetch-summarize",
+            "temporal",
+            "today"
+          ],
+          "mcpServers": [
+            "sequential-thinking",
+            "time",
+            "fetch",
+            "filesystem",
+            "git",
+            "search-with-key"
+          ]
         }
       },
       "antigravity": {
@@ -742,7 +770,21 @@ window.HIRES_DATA = [
           "isolate": false,
           "tokenCap": 800000,
           "author": "Agent Gallery",
-          "homepage": "https://github.com/chaitanyagiri/munder-difflin"
+          "homepage": "https://github.com/chaitanyagiri/munder-difflin",
+          "skills": [
+            "md-hive-sync",
+            "md-fetch-summarize",
+            "temporal",
+            "today"
+          ],
+          "mcpServers": [
+            "sequential-thinking",
+            "time",
+            "fetch",
+            "filesystem",
+            "git",
+            "search-with-key"
+          ]
         }
       },
       "codex": {
@@ -764,7 +806,21 @@ window.HIRES_DATA = [
           "isolate": false,
           "tokenCap": 800000,
           "author": "Agent Gallery",
-          "homepage": "https://github.com/chaitanyagiri/munder-difflin"
+          "homepage": "https://github.com/chaitanyagiri/munder-difflin",
+          "skills": [
+            "md-hive-sync",
+            "md-fetch-summarize",
+            "temporal",
+            "today"
+          ],
+          "mcpServers": [
+            "sequential-thinking",
+            "time",
+            "fetch",
+            "filesystem",
+            "git",
+            "search-with-key"
+          ]
         }
       }
     }
@@ -1675,7 +1731,19 @@ window.HIRES_DATA = [
       "isolate": false,
       "tokenCap": 1500000,
       "author": "Agent Gallery",
-      "homepage": "https://github.com/chaitanyagiri/munder-difflin"
+      "homepage": "https://github.com/chaitanyagiri/munder-difflin",
+      "skills": [
+        "md-hive-sync",
+        "md-fetch-summarize"
+      ],
+      "mcpServers": [
+        "sequential-thinking",
+        "time",
+        "fetch",
+        "filesystem",
+        "git",
+        "search-with-key"
+      ]
     },
     "baseProvider": "claude",
     "variants": {
@@ -1704,7 +1772,19 @@ window.HIRES_DATA = [
           "isolate": false,
           "tokenCap": 1500000,
           "author": "Agent Gallery",
-          "homepage": "https://github.com/chaitanyagiri/munder-difflin"
+          "homepage": "https://github.com/chaitanyagiri/munder-difflin",
+          "skills": [
+            "md-hive-sync",
+            "md-fetch-summarize"
+          ],
+          "mcpServers": [
+            "sequential-thinking",
+            "time",
+            "fetch",
+            "filesystem",
+            "git",
+            "search-with-key"
+          ]
         }
       },
       "antigravity": {
@@ -1727,7 +1807,19 @@ window.HIRES_DATA = [
           "isolate": false,
           "tokenCap": 1500000,
           "author": "Agent Gallery",
-          "homepage": "https://github.com/chaitanyagiri/munder-difflin"
+          "homepage": "https://github.com/chaitanyagiri/munder-difflin",
+          "skills": [
+            "md-hive-sync",
+            "md-fetch-summarize"
+          ],
+          "mcpServers": [
+            "sequential-thinking",
+            "time",
+            "fetch",
+            "filesystem",
+            "git",
+            "search-with-key"
+          ]
         }
       },
       "codex": {
@@ -1750,7 +1842,19 @@ window.HIRES_DATA = [
           "isolate": false,
           "tokenCap": 1500000,
           "author": "Agent Gallery",
-          "homepage": "https://github.com/chaitanyagiri/munder-difflin"
+          "homepage": "https://github.com/chaitanyagiri/munder-difflin",
+          "skills": [
+            "md-hive-sync",
+            "md-fetch-summarize"
+          ],
+          "mcpServers": [
+            "sequential-thinking",
+            "time",
+            "fetch",
+            "filesystem",
+            "git",
+            "search-with-key"
+          ]
         }
       }
     }
@@ -1780,7 +1884,20 @@ window.HIRES_DATA = [
       "isolate": false,
       "tokenCap": 1500000,
       "author": "Agent Gallery",
-      "homepage": "https://github.com/chaitanyagiri/munder-difflin"
+      "homepage": "https://github.com/chaitanyagiri/munder-difflin",
+      "skills": [
+        "md-hive-sync",
+        "md-fetch-summarize",
+        "today"
+      ],
+      "mcpServers": [
+        "sequential-thinking",
+        "time",
+        "fetch",
+        "filesystem",
+        "git",
+        "search-with-key"
+      ]
     },
     "baseProvider": "claude",
     "variants": {
@@ -1809,7 +1926,20 @@ window.HIRES_DATA = [
           "isolate": false,
           "tokenCap": 1500000,
           "author": "Agent Gallery",
-          "homepage": "https://github.com/chaitanyagiri/munder-difflin"
+          "homepage": "https://github.com/chaitanyagiri/munder-difflin",
+          "skills": [
+            "md-hive-sync",
+            "md-fetch-summarize",
+            "today"
+          ],
+          "mcpServers": [
+            "sequential-thinking",
+            "time",
+            "fetch",
+            "filesystem",
+            "git",
+            "search-with-key"
+          ]
         }
       },
       "antigravity": {
@@ -1832,7 +1962,20 @@ window.HIRES_DATA = [
           "isolate": false,
           "tokenCap": 1500000,
           "author": "Agent Gallery",
-          "homepage": "https://github.com/chaitanyagiri/munder-difflin"
+          "homepage": "https://github.com/chaitanyagiri/munder-difflin",
+          "skills": [
+            "md-hive-sync",
+            "md-fetch-summarize",
+            "today"
+          ],
+          "mcpServers": [
+            "sequential-thinking",
+            "time",
+            "fetch",
+            "filesystem",
+            "git",
+            "search-with-key"
+          ]
         }
       },
       "codex": {
@@ -1855,7 +1998,20 @@ window.HIRES_DATA = [
           "isolate": false,
           "tokenCap": 1500000,
           "author": "Agent Gallery",
-          "homepage": "https://github.com/chaitanyagiri/munder-difflin"
+          "homepage": "https://github.com/chaitanyagiri/munder-difflin",
+          "skills": [
+            "md-hive-sync",
+            "md-fetch-summarize",
+            "today"
+          ],
+          "mcpServers": [
+            "sequential-thinking",
+            "time",
+            "fetch",
+            "filesystem",
+            "git",
+            "search-with-key"
+          ]
         }
       }
     }
@@ -1885,7 +2041,20 @@ window.HIRES_DATA = [
       "isolate": false,
       "tokenCap": 2000000,
       "author": "Agent Gallery",
-      "homepage": "https://github.com/chaitanyagiri/munder-difflin"
+      "homepage": "https://github.com/chaitanyagiri/munder-difflin",
+      "skills": [
+        "md-hive-sync",
+        "md-fetch-summarize"
+      ],
+      "mcpServers": [
+        "sequential-thinking",
+        "time",
+        "fetch",
+        "filesystem",
+        "git",
+        "search-with-key",
+        "context7"
+      ]
     },
     "baseProvider": "claude",
     "variants": {
@@ -1914,7 +2083,20 @@ window.HIRES_DATA = [
           "isolate": false,
           "tokenCap": 2000000,
           "author": "Agent Gallery",
-          "homepage": "https://github.com/chaitanyagiri/munder-difflin"
+          "homepage": "https://github.com/chaitanyagiri/munder-difflin",
+          "skills": [
+            "md-hive-sync",
+            "md-fetch-summarize"
+          ],
+          "mcpServers": [
+            "sequential-thinking",
+            "time",
+            "fetch",
+            "filesystem",
+            "git",
+            "search-with-key",
+            "context7"
+          ]
         }
       },
       "antigravity": {
@@ -1937,7 +2119,20 @@ window.HIRES_DATA = [
           "isolate": false,
           "tokenCap": 2000000,
           "author": "Agent Gallery",
-          "homepage": "https://github.com/chaitanyagiri/munder-difflin"
+          "homepage": "https://github.com/chaitanyagiri/munder-difflin",
+          "skills": [
+            "md-hive-sync",
+            "md-fetch-summarize"
+          ],
+          "mcpServers": [
+            "sequential-thinking",
+            "time",
+            "fetch",
+            "filesystem",
+            "git",
+            "search-with-key",
+            "context7"
+          ]
         }
       },
       "codex": {
@@ -1960,7 +2155,20 @@ window.HIRES_DATA = [
           "isolate": false,
           "tokenCap": 2000000,
           "author": "Agent Gallery",
-          "homepage": "https://github.com/chaitanyagiri/munder-difflin"
+          "homepage": "https://github.com/chaitanyagiri/munder-difflin",
+          "skills": [
+            "md-hive-sync",
+            "md-fetch-summarize"
+          ],
+          "mcpServers": [
+            "sequential-thinking",
+            "time",
+            "fetch",
+            "filesystem",
+            "git",
+            "search-with-key",
+            "context7"
+          ]
         }
       }
     }

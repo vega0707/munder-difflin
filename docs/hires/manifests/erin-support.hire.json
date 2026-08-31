@@ -23,10 +23,16 @@
   "author": "Agent Gallery",
   "homepage": "https://github.com/chaitanyagiri/munder-difflin",
   "skills": [
+    "md-hive-sync",
+    "md-fetch-summarize",
     "today"
   ],
   "mcpServers": [
+    "sequential-thinking",
+    "time",
     "fetch",
-    "filesystem"
+    "filesystem",
+    "git",
+    "search-with-key"
   ]
 }
