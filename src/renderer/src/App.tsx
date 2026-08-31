@@ -188,10 +188,11 @@ export function App() {
   };
 
   // The hive: god-agent bootstrap, hook-driven avatars, idle-agent waking. Held
-  // off until the user opens a hive in the launch picker (passing null no-ops the
-  // hook) so Michael doesn't boot against the current home while the user may be
-  // about to switch to a different one.
-  useHive(hiveOpened ? config : null);
+  // off until a harness home is configured (passing null no-ops the hook) so
+  // Michael doesn't boot against the current home while the user may be about to
+  // switch to a different one. With the launch picker skipped for configured
+  // hives, having a harnessHome IS the "opened" signal.
+  useHive(config?.harnessHome ? config : null);
 
   // Pre-warm a persistent terminal for every live agent so its output is
   // buffered from spawn. Switching agents then re-attaches an already-rendered
