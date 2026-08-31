@@ -38,11 +38,14 @@ import {
   type AgentProvider
 } from '../shared/agentProvider';
 import { MCP_CATALOG } from '../shared/mcpCatalog';
+import { seatMcpEnabledMap, seatSkillAllowed, parseSeatAllowlist } from '../shared/seatTools';
 import { selectBroadcastTargets } from '../shared/broadcast';
 import { preferredAgentRole } from '../shared/agentRole';
 import { mergeTaskLedger } from '../shared/taskLedger';
+import { RunProjectionStore } from './runProjection';
 import { expandTilde } from './fs';
 import { resolveGodName } from '../shared/godIdentity';
+import { parseFloorAddress, type FloorAddress } from '../shared/floorAddress';
 
 /** The subset of HarnessConfig the hive consumes for the default-MCP merge.
  *  Kept as a local shape so hive.ts never imports the foundation-owned config
@@ -58,7 +61,7 @@ export interface HiveMessage {
   conversation: string;
   in_reply_to: string | null;
   from: string;
-  to: string;                 // an agentId, 'god', or 'broadcast'
+  to: string;                 // an agentId, 'god', 'broadcast', or floor:<projectId>/<agentId>
   act: MessageAct;
   subject: string;
   body: string;
@@ -116,6 +119,8 @@ export interface HiveTask {
    *  proceed with the human's input (status goes blocked); the harness UI
    *  fills in {a}. The full history stays on the card forever. */
   humanQA?: HumanQA[];
+  /** When set, ties this card to a Flow Run projection (`runs.json`). */
+  runId?: string;
   /** Outcome summary, surfaced by the Slack done-notifier when this card reaches
    *  'done'. Optional; the notifier falls back to description/title. */
   result?: string;
@@ -142,6 +147,16 @@ export interface AgentMeta {
   /** Michael's prep assistant — enriches prompts and forwards them to Michael.
    *  Send-only: excluded from broadcast fan-out so it never drains an inbox. */
   isAssistant?: boolean;
+  /**
+   * Per-seat bundled-skill allowlist (folder names under app skills/).
+   * Omit/undefined = inherit all bundled skills; [] = none.
+   */
+  skills?: string[];
+  /**
+   * Per-seat MCP catalog-id allowlist.
+   * Omit/undefined = inherit floor mcpDefaults; [] = none.
+   */
+  mcp?: string[];
 }
 
 export interface RegistryAgent extends AgentMeta {
@@ -288,21 +303,106 @@ export function redactSecrets(text: unknown): string {
   return s;
 }
 
+function withProjectId(payload: unknown, projectId: string): unknown {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return payload;
+  if ('projectId' in payload) return payload;
+  return { ...(payload as Record<string, unknown>), projectId };
+}
+
 // ─── HiveManager ────────────────────────────────────────────────────────────
 
 export class HiveManager {
   /**
-   * @param getHome  Lazily resolve harnessHome so the hive follows config changes.
+   * @param getHome  Lazily resolve the project root so the hive follows
+   *                 `<projectRoot>/hive`. Callers used to pass harnessHome;
+   *                 ProjectRegistry now passes the per-project directory.
    * @param emit     Optional sink for renderer-facing events (set by the main
    *                 process to `webContents.send`). Used to animate routed
    *                 messages on the office floor; a no-op in tests/headless.
+   * @param projectId Stable id of the project that owns this hive.
    */
+  private emit?: (channel: string, payload: unknown) => boolean | void;
+
   constructor(
     private getHome: () => string | null,
-    private emit?: (channel: string, payload: unknown) => boolean | void
-  ) {}
+    emit?: (channel: string, payload: unknown) => boolean | void,
+    readonly projectId: string = 'default'
+  ) {
+    this.emit = emit
+      ? (channel, payload) => emit(channel, withProjectId(payload, projectId))
+      : undefined;
+  }
+
+  /** Deliver mail addressed to `floor:<projectId>/<agentId>` into another hive.
+   *  Returns false when the target floor/agent cannot take the file. The
+   *  ProjectRegistry wires this; tests may inject a fake. Never resumes a PTY. */
+  private crossFloor: ((msg: HiveMessage, addr: FloorAddress) => boolean) | null = null;
+  setCrossFloorRouter(fn: ((msg: HiveMessage, addr: FloorAddress) => boolean) | null): void {
+    this.crossFloor = fn;
+  }
 
   private routerTimer: NodeJS.Timeout | null = null;
+  private _projection: RunProjectionStore | null = null;
+
+  private projection(): RunProjectionStore {
+    if (!this._projection) {
+      this._projection = new RunProjectionStore(() => this.root());
+    }
+    return this._projection;
+  }
+
+  /** Flow tab: list durable Run projections. */
+  runFlowList(): ReturnType<RunProjectionStore['list']> {
+    return this.projection().list();
+  }
+
+  runFlowDefaultView(): ReturnType<RunProjectionStore['defaultView']> {
+    return this.projection().defaultView();
+  }
+
+  runFlowGet(id: string): ReturnType<RunProjectionStore['get']> {
+    return this.projection().get(id);
+  }
+
+  /** Retry from the failed step onward; resets tasks and asks god to continue. */
+  // TODO[REENTRANCY]: retryInFlight latch rejects concurrent retries; clear only after send or abort.
+  // TODO[FAILURE_HANDLING]: send failure must abortRetry so the UI can retry again.
+  runFlowRetry(runId: string): { ok: boolean; error?: string } {
+    const before = this.projection().get(runId);
+    if (!before || before.status !== 'failed') return { ok: false, error: 'not-failed' };
+    const failStep = before.failedStepIndex != null
+      ? before.steps[before.failedStepIndex]
+      : before.steps.find((s) => s.status === 'failed');
+    const prep = this.projection().beginRetry(runId);
+    if (!prep.ok) return prep;
+    const ledger = this.tasks() as { tasks?: HiveTask[] };
+    const tasks = Array.isArray(ledger?.tasks) ? [...ledger.tasks] : [];
+    for (const taskId of prep.taskIdsToReset) {
+      const i = tasks.findIndex((t) => t?.id === taskId);
+      if (i >= 0) tasks[i] = { ...tasks[i], status: 'todo' };
+    }
+    this.writeTasks(tasks);
+    const run = this.projection().get(runId);
+    try {
+      this.send({
+        act: 'request',
+        conversation: run?.conversation ?? before.conversation,
+        subject: `Retry: ${failStep?.title ?? 'failed step'}`,
+        body: `Please continue this run from the failed step (${failStep?.taskId ?? 'unknown'}). Run id: ${runId}.`
+      }, 'human');
+      this.projection().finishRetry(runId);
+      return { ok: true };
+    } catch {
+      this.projection().abortRetry(runId);
+      return { ok: false, error: 'send-failed' };
+    }
+  }
+
+  private syncRunProjection(tasks: HiveTask[]): void {
+    try {
+      this.projection().syncFromTasks(tasks);
+    } catch { /* best-effort */ }
+  }
 
   /** The embedded OTLP collector's loopback URL, set by the main process once the
    *  collector is bound (telemetry.ts). null = telemetry off → no OTel env is
@@ -660,7 +760,14 @@ export class HiveManager {
     // app-resources skills/ dir on every spawn (same policy as identity.md), so an
     // agent always rides with the shipped safe skill set. Tolerant: a missing or
     // partial source dir is a no-op (Kevin populates the resource dir in lp-manifest).
-    if (opts.skillsDir) this.copyBundledSkills(opts.skillsDir, join(dir, '.claude', 'skills'));
+    // Per-seat `skills` allowlist (when set) copies only those folders.
+    if (opts.skillsDir) {
+      this.copyBundledSkills(
+        opts.skillsDir,
+        join(dir, '.claude', 'skills'),
+        parseSeatAllowlist(meta.skills ?? prev?.skills)
+      );
+    }
 
     const memory = join(dir, 'memory.md');
     if (!existsSync(memory)) {
@@ -901,7 +1008,14 @@ export class HiveManager {
     if (sock && shim) {
       env.HIVE_SOCK = sock;
       const settingsPath = join(dir, 'settings.json');
-      this.writeJson(settingsPath, this.hookSettings(shim, meta.cwd, opts.mcpDefaults, opts.theme, this.sandboxWritableDirs(meta, dir, root, opts.extraWritableDirs)));
+      this.writeJson(settingsPath, this.hookSettings(
+        shim,
+        meta.cwd,
+        opts.mcpDefaults,
+        opts.theme,
+        this.sandboxWritableDirs(meta, dir, root, opts.extraWritableDirs),
+        parseSeatAllowlist(meta.mcp ?? prev?.mcp)
+      ));
       args.push('--settings', settingsPath);
     }
     return { args, env };
@@ -926,6 +1040,35 @@ export class HiveManager {
       this.appendLog({ kind: 'role', agentId: id, role: next });
       this.commit(`hive: role ${id}`);
       return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  /** Persist per-seat skill / MCP allowlists. Takes effect on next spawn. */
+  patchAgentTools(
+    id: string,
+    patch: { skills?: string[] | null; mcp?: string[] | null }
+  ): { ok: boolean; error?: string; skills?: string[]; mcp?: string[] } {
+    const root = this.root();
+    if (!root) return { ok: false, error: 'hive disabled' };
+    try {
+      const reg = this.registry();
+      const agent = reg.agents[id];
+      if (!agent) return { ok: false, error: 'unknown agent' };
+      if ('skills' in patch) {
+        if (patch.skills === null) delete agent.skills;
+        else agent.skills = parseSeatAllowlist(patch.skills) ?? [];
+      }
+      if ('mcp' in patch) {
+        if (patch.mcp === null) delete agent.mcp;
+        else agent.mcp = parseSeatAllowlist(patch.mcp) ?? [];
+      }
+      agent.lastSeen = Date.now();
+      this.writeJson(join(root, 'registry.json'), reg);
+      this.appendLog({ kind: 'tools', agentId: id, skills: agent.skills, mcp: agent.mcp });
+      this.commit(`hive: tools ${id}`);
+      return { ok: true, skills: agent.skills, mcp: agent.mcp };
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
     }
@@ -1082,7 +1225,14 @@ export class HiveManager {
     return Array.from(new Set(out));
   }
 
-  private hookSettings(shim: string, cwd: string, cfg: McpDefaultsMap, theme?: 'light' | 'dark', writableDirs: string[] = []): unknown {
+  private hookSettings(
+    shim: string,
+    cwd: string,
+    cfg: McpDefaultsMap,
+    theme?: 'light' | 'dark',
+    writableDirs: string[] = [],
+    seatMcp?: string[]
+  ): unknown {
     // Bundled node, NOT bare `node` — see nodeLauncherPath(). Claude runs each of
     // these through `sh -c` with a stripped PATH, where `node` is often absent.
     const cmd = this.nodeRun(shim);
@@ -1090,7 +1240,7 @@ export class HiveManager {
       ...(matcher ? { matcher } : {}),
       hooks: [{ type: 'command', command: cmd }]
     });
-    const mcpServers = this.buildDefaultMcpServers(cwd, cfg);
+    const mcpServers = this.buildDefaultMcpServers(cwd, cfg, seatMcp);
     return {
       // Match the TUI's truecolor palette to the harness terminal theme —
       // PER SESSION, so the user's global Claude theme (their own terminals
@@ -1157,12 +1307,19 @@ export class HiveManager {
    */
   private buildDefaultMcpServers(
     cwd: string,
-    cfg: McpDefaultsMap
+    cfg: McpDefaultsMap,
+    seatMcp?: string[]
   ): Record<string, { command: string; args: string[]; env?: Record<string, string> }> {
+    const enabledMap = seatMcpEnabledMap(
+      cfg,
+      MCP_CATALOG.map((e) => e.id),
+      (id) => MCP_CATALOG.find((e) => e.id === id)?.defaultEnabled ?? false,
+      seatMcp
+    );
     const out: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {};
     for (const e of MCP_CATALOG) {
       const consented = cfg?.[e.id]?.enabled;
-      const enabled = consented ?? e.defaultEnabled;
+      const enabled = enabledMap[e.id]?.enabled ?? false;
       if (!enabled) continue;
       // Defense-in-depth: a write/secret server requires an EXPLICIT opt-in; it can
       // never ride in on a default (the catalog already ships these OFF, but this
@@ -1186,22 +1343,35 @@ export class HiveManager {
    * the app. Best-effort and fully tolerant — a missing/empty source dir is a no-op
    * (Kevin populates the resource dir in lp-manifest), and any IO error is swallowed
    * so skill provisioning can never block a spawn.
+   * When `seatSkills` is set, only those skill folders are copied (isolation).
    */
-  private copyBundledSkills(srcDir: string, destDir: string): void {
+  private copyBundledSkills(srcDir: string, destDir: string, seatSkills?: string[]): void {
     try {
       if (!existsSync(srcDir)) return;
-      const copyTree = (from: string, to: string): void => {
-        const entries = readdirSync(from, { withFileTypes: true });
-        if (!entries.length) return;
-        mkdirSync(to, { recursive: true });
-        for (const ent of entries) {
-          const s = join(from, ent.name);
-          const d = join(to, ent.name);
-          if (ent.isDirectory()) copyTree(s, d);
-          else if (ent.isFile()) copyFileSync(s, d);
+      try { rmSync(destDir, { recursive: true, force: true }); } catch { /* fresh dest */ }
+      mkdirSync(destDir, { recursive: true });
+      const entries = readdirSync(srcDir, { withFileTypes: true });
+      for (const ent of entries) {
+        if (!ent.isDirectory() && !ent.isFile()) continue;
+        if (!seatSkillAllowed(ent.name, seatSkills)) continue;
+        const s = join(srcDir, ent.name);
+        const d = join(destDir, ent.name);
+        if (ent.isDirectory()) {
+          const copyTree = (from: string, to: string): void => {
+            const kids = readdirSync(from, { withFileTypes: true });
+            mkdirSync(to, { recursive: true });
+            for (const kid of kids) {
+              const ks = join(from, kid.name);
+              const kd = join(to, kid.name);
+              if (kid.isDirectory()) copyTree(ks, kd);
+              else if (kid.isFile()) copyFileSync(ks, kd);
+            }
+          };
+          copyTree(s, d);
+        } else if (ent.isFile()) {
+          copyFileSync(s, d);
         }
-      };
-      copyTree(srcDir, destDir);
+      }
     } catch (e) { console.error('[hive] copyBundledSkills failed:', e); }
   }
 
@@ -1487,6 +1657,9 @@ export class HiveManager {
   /** Inject a message directly (used by the orchestrator / UI / tests). */
   send(partial: Partial<HiveMessage>, from = 'system'): HiveMessage {
     const msg = this.normalize(partial, from);
+    if (from === 'human' && msg.act === 'request') {
+      try { this.projection().onHumanRequest(msg); } catch { /* best-effort */ }
+    }
     this.routeMessage(msg);
     this.commit(`hive: msg ${msg.from}→${msg.to} (${msg.act})`);
     return msg;
@@ -1497,6 +1670,11 @@ export class HiveManager {
       // loop guard — drop a runaway message rather than let agents ping-pong.
       // There's no human queue to fall back on; the god agent owns conflicts.
       this.appendLog({ kind: 'drop', reason: 'hop-cap', from: msg.from, to: msg.to, id: msg.id });
+      return;
+    }
+    const floor = parseFloorAddress(msg.to);
+    if (floor) {
+      this.routeCrossFloor(msg, floor);
       return;
     }
     const reg = this.registry();
@@ -1582,6 +1760,142 @@ export class HiveManager {
     // Main-process observer (e.g. the closing-time controller watching for the
     // team's ACKs and the god's COMPLETE). Best-effort, never breaks routing.
     try { this.routedObserver?.(msg, targets); } catch { /* observer error */ }
+  }
+
+  private routeCrossFloor(msg: HiveMessage, addr: FloorAddress): void {
+    const delivered = this.crossFloor?.(msg, addr) === true;
+    const target = `floor:${addr.projectId}/${addr.agentId}`;
+    if (!delivered) {
+      this.appendLog({ kind: 'drop', reason: 'no-floor', from: msg.from, to: msg.to, id: msg.id });
+      const godId = this.registry().godId ?? 'god';
+      if (msg.from !== godId) {
+        this.deliver({
+          ...msg,
+          to: godId,
+          subject: `[undeliverable — no floor "${addr.projectId}" / agent "${addr.agentId}"; check project tabs] ${msg.subject}`
+        }, godId);
+      }
+      this.appendLog({ kind: 'message', from: msg.from, to: msg.to, act: msg.act, subject: msg.subject, id: msg.id, delivered: [] });
+      this.emitMessage(msg, []);
+      try { this.routedObserver?.(msg, []); } catch { /* observer error */ }
+      return;
+    }
+    this.appendLog({ kind: 'message', from: msg.from, to: msg.to, act: msg.act, subject: msg.subject, id: msg.id, delivered: [target] });
+    this.emitMessage(msg, [target]);
+    try { this.routedObserver?.(msg, [target]); } catch { /* observer error */ }
+  }
+
+  /**
+   * Accept a message already addressed at this hive (local agent id, or god/human).
+   * Used for cross-floor delivery so the target does not re-parse a floor: to.
+   * Does not resume any PTY — the file just lands in inbox/.
+   */
+  acceptInbound(msg: HiveMessage): boolean {
+    const reg = this.registry();
+    const godId = reg.godId ?? 'god';
+    const toId = (msg.to === 'god' || msg.to === 'human') ? godId : msg.to;
+    if (!this.deliver(msg, toId)) return false;
+    this.appendLog({
+      kind: 'message',
+      from: msg.from,
+      to: msg.to,
+      act: msg.act,
+      subject: msg.subject,
+      id: msg.id,
+      delivered: [toId]
+    });
+    this.emitMessage(msg, [toId]);
+    try { this.routedObserver?.(msg, [toId]); } catch { /* observer error */ }
+    try { this.commit(`hive: inbound ${msg.from}→${toId}`); } catch { /* best-effort */ }
+    return true;
+  }
+
+  /**
+   * Write a takeover pack onto disk. Identity/memory/inbox only — no secrets,
+   * no working tree. Does not emit live PTY events; the next spawn drains inbox.
+   */
+  applyHandoffPack(agentId: string, pack: {
+    identity?: string;
+    memory?: string;
+    inbox?: unknown;
+  }): void {
+    const dir = this.agentDir(agentId);
+    mkdirSync(join(dir, 'inbox', '.done'), { recursive: true });
+    mkdirSync(join(dir, 'outbox', '.sent'), { recursive: true });
+    if (typeof pack.identity === 'string' && pack.identity.trim()) {
+      writeFileSync(join(dir, 'identity.md'), pack.identity, 'utf8');
+    }
+    if (typeof pack.memory === 'string' && pack.memory.trim()) {
+      writeFileSync(join(dir, 'memory.md'), pack.memory, 'utf8');
+    }
+    if (!Array.isArray(pack.inbox)) return;
+    for (const raw of pack.inbox) {
+      if (!raw || typeof raw !== 'object') continue;
+      const msg = raw as { id?: unknown };
+      if (typeof msg.id !== 'string' || !msg.id) continue;
+      const dest = join(dir, 'inbox', `${msg.id}.json`);
+      if (existsSync(dest)) continue;
+      this.atomicWriteJson(dest, raw);
+    }
+  }
+
+  /** Move an inbox file into `.done/` after a built-in runner handles it. */
+  archiveInbox(agentId: string, msgId: string): boolean {
+    const src = join(this.agentDir(agentId), 'inbox', `${msgId}.json`);
+    const destDir = join(this.agentDir(agentId), 'inbox', '.done');
+    if (!existsSync(src)) return false;
+    mkdirSync(destDir, { recursive: true });
+    try {
+      renameSync(src, join(destDir, `${msgId}.json`));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Make `agentId` this floor's god. The previous orchestrator stays on the
+   * floor as a worker (same id, including the seeded `god` id). `to: 'god'`
+   * keeps resolving through `godId`.
+   */
+  promoteGod(agentId: string): { ok: true; godId: string; previousGodId: string | null } | { ok: false; error: string } {
+    const root = this.root();
+    if (!root) return { ok: false, error: 'hive disabled' };
+    try {
+      const reg = this.registry();
+      const agent = reg.agents[agentId];
+      if (!agent) return { ok: false, error: 'unknown agent' };
+      if (agent.isAssistant) return { ok: false, error: 'the send-only assistant cannot be god' };
+      const previousGodId = reg.godId;
+      if (reg.godId === agentId && agent.isGod) {
+        return { ok: true, godId: agentId, previousGodId };
+      }
+      for (const row of Object.values(reg.agents)) {
+        const wasGod = row.id === previousGodId || !!row.isGod;
+        row.isGod = row.id === agentId;
+        if (row.id === agentId) {
+          row.role = 'orchestrator (god)';
+        } else if (wasGod && (row.role === 'orchestrator (god)' || row.role === 'orchestrator')) {
+          row.role = 'agent';
+        }
+        row.lastSeen = Date.now();
+      }
+      reg.godId = agentId;
+      this.atomicWriteJson(join(root, 'registry.json'), reg);
+      writeFileSync(join(this.agentDir(agentId), 'identity.md'), this.identityText(reg.agents[agentId]), 'utf8');
+      if (previousGodId && previousGodId !== agentId && reg.agents[previousGodId]) {
+        writeFileSync(
+          join(this.agentDir(previousGodId), 'identity.md'),
+          this.identityText(reg.agents[previousGodId]),
+          'utf8'
+        );
+      }
+      this.appendLog({ kind: 'promote', agentId, previousGodId });
+      this.commit(`hive: promote ${agentId}`);
+      return { ok: true, godId: agentId, previousGodId };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
   }
 
   /** Observer invoked for EVERY routed message with its resolved targets.
@@ -1712,6 +2026,7 @@ export class HiveManager {
     const merged = mergeTaskLedger(current?.tasks, tasks);
     this.writeJson(path, { tasks: merged });
     this.appendLog({ kind: 'tasks', count: merged.length });
+    this.syncRunProjection(merged as HiveTask[]);
     this.commit(`hive: tasks (${merged.length})`);
   }
 
@@ -1722,7 +2037,12 @@ export class HiveManager {
     const ledger = this.tasks() as { tasks?: HiveTask[] };
     const tasks = Array.isArray(ledger?.tasks) ? ledger.tasks : [];
     if (tasks.some((current) => current?.id === task.id)) return false;
-    this.writeTasks([...tasks, task]);
+    const data = this.projection().load();
+    const active = data.lastActiveRunId
+      ? data.runs.find((r) => r.id === data.lastActiveRunId && r.status === 'in_progress')
+      : undefined;
+    const next = active && !task.runId ? { ...task, runId: active.id } : task;
+    this.writeTasks([...tasks, next]);
     return true;
   }
 
@@ -2634,7 +2954,7 @@ Write one JSON file into \`outbox/\` (any filename ending in \`.json\`):
 
 \`\`\`json
 {
-  "to": "<agent-id> | god | broadcast",
+  "to": "<agent-id> | god | broadcast | floor:<projectId>/<agentId>",
   "act": "request | inform | propose | query | agree | refuse | done",
   "subject": "one-line summary",
   "body": "the details",
@@ -2644,6 +2964,19 @@ Write one JSON file into \`outbox/\` (any filename ending in \`.json\`):
 \`\`\`
 
 The harness fills in \`id\`, \`from\`, \`hops\`, and timestamps.
+
+## Cross-floor mail (other projects)
+Each project is its own floor. To reach an agent on another floor:
+
+\`"to": "floor:<projectId>/<agentId>"\`
+
+\`god\` and \`human\` still mean that floor's current orchestrator. The harness
+drops the file in the target inbox and does **not** wake a stopped PTY — a
+paused floor reads the mail when you switch to it, or when another machine
+claims that seat.
+
+The delivered copy's \`from\` is rewritten to \`floor:<yourProjectId>/<your-id>\`
+so a reply can use the same address form.
 
 ## Rules of the road
 - Only \`request\`, \`query\`, and \`propose\` expect a reply. \`inform\` and \`done\` are terminal —

@@ -21,19 +21,14 @@
  *     auto-enabled (consistent with "import only pre-fills; human clicks spawn").
  */
 
+import { BUNDLED_SKILL_ID_SET } from './bundledSkills';
 import { mcpCatalogEntry } from './mcpCatalog';
 import { MAX_AGENT_TOKEN_CAP } from './tokenCaps';
 
 export const HIRE_SPEC_V1 = 'munder-difflin/hire@1';
 
-/** Skill ids bundled in app resources (the only values a hire manifest may request
- *  in the `skills` field). A manifest can never name an arbitrary skill path —
- *  only these curated, read-only, no-secret skill ids are allowlisted. */
-export const BUNDLED_SKILL_IDS: ReadonlySet<string> = new Set([
-  'md-hive-sync',
-  'md-fetch-summarize',
-  'md-audit'
-]);
+/** Re-export for hire validation — see bundledSkills.ts for the canonical list. */
+export const BUNDLED_SKILL_IDS = BUNDLED_SKILL_ID_SET;
 
 /** Providers a manifest may request ('agy' is accepted as an alias for
  *  'antigravity'). 'custom' is deliberately NOT allowed — it would let a

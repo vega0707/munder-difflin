@@ -7,6 +7,7 @@ import { ensureKilled, hardKillTree } from './procKill';
 import { expandTilde } from './fs';
 import { buildPtyEnv } from './ptyEnv';
 import { captureFromLoginShell, isSafeCommandName, userShellEnv, userShellPath } from './shellEnv';
+import { countActivePtys, DEFAULT_PROJECT_ID, ptyStopSignal, ptyContinueSignal } from '../shared/projectTypes';
 
 /** APPEND the hive's bundled-node dir (`<HIVE_ROOT>/bin/runtime`, which holds a
  *  shim literally named `node`) to a child's PATH.
@@ -49,6 +50,11 @@ interface PtySession {
   /** True after the child has emitted at least one frame. Automation waits for
    *  this before typing, so startup prompts cannot outrun the TUI subscription. */
   hasOutput: boolean;
+  /** Hive that owns this session. Agent ids repeat across projects; this does not. */
+  projectId: string;
+  /** POSIX: SIGSTOP'd. Windows: flag only — the process keeps running and still
+   *  counts toward MAX_ACTIVE_AGENTS. */
+  suspended: boolean;
 }
 
 export interface SpawnOptions {
@@ -67,6 +73,8 @@ export interface SpawnOptions {
    *  MUST contain no embedded double-quotes (it is wrapped verbatim on Windows).
    *  `command` is still recorded for display but is not executed. */
   shellScript?: string;
+  /** Owning project. Omitted spawns inherit `'default'` (legacy single-hive). */
+  projectId?: string;
 }
 
 /**
@@ -669,7 +677,9 @@ export class PtyManager {
         command: resolved,
         lastOutputAt: Date.now(),
         hasOutput: false,
-        owner
+        owner,
+        projectId: opts.projectId || DEFAULT_PROJECT_ID,
+        suspended: false
       };
       this.sessions.set(opts.id, session);
 
@@ -749,15 +759,81 @@ export class PtyManager {
     }
   }
 
-  list(): Array<{ id: string; cwd: string; command: string; pid: number; lastOutputAt: number; hasOutput: boolean }> {
+  list(): Array<{
+    id: string;
+    cwd: string;
+    command: string;
+    pid: number;
+    lastOutputAt: number;
+    hasOutput: boolean;
+    projectId: string;
+    suspended: boolean;
+  }> {
     return Array.from(this.sessions.values()).map(s => ({
       id: s.id,
       cwd: s.cwd,
       command: s.command,
       pid: s.proc.pid,
       lastOutputAt: s.lastOutputAt,
-      hasOutput: s.hasOutput
+      hasOutput: s.hasOutput,
+      projectId: s.projectId,
+      suspended: s.suspended
     }));
+  }
+
+  getActivePtyCount(): number {
+    return countActivePtys(this.sessions.values(), process.platform);
+  }
+
+  countProjectSessions(projectId: string, opts?: { runningOnly?: boolean }): number {
+    let n = 0;
+    for (const s of this.sessions.values()) {
+      if (s.projectId !== projectId) continue;
+      if (opts?.runningOnly && s.suspended) continue;
+      n++;
+    }
+    return n;
+  }
+
+  /** Freeze a project's PTYs so switching floors can free active slots.
+   *  Windows: flag only (SIGSTOP is not available); they still count as active. */
+  suspendProject(projectId: string): { stopped: number } {
+    const signal = ptyStopSignal(process.platform);
+    let stopped = 0;
+    for (const s of this.sessions.values()) {
+      if (s.projectId !== projectId || s.suspended) continue;
+      if (signal) {
+        try { s.proc.kill(signal); } catch {
+          try { process.kill(s.proc.pid, signal); } catch { /* already gone */ }
+        }
+      }
+      s.suspended = true;
+      stopped++;
+    }
+    return { stopped };
+  }
+
+  /** Wake a project's PTYs. Caller must have checked MAX_ACTIVE_AGENTS. */
+  resumeProject(projectId: string): { ok: true; resumed: number } | { ok: false; code: 'RESUME_LIMIT_REACHED'; error: string } {
+    const signal = ptyContinueSignal(process.platform);
+    let resumed = 0;
+    for (const s of this.sessions.values()) {
+      if (s.projectId !== projectId || !s.suspended) continue;
+      if (signal) {
+        try { s.proc.kill(signal); } catch {
+          try { process.kill(s.proc.pid, signal); } catch { /* already gone */ }
+        }
+      }
+      s.suspended = false;
+      resumed++;
+    }
+    return { ok: true, resumed };
+  }
+
+  killProject(projectId: string): void {
+    for (const [id, s] of [...this.sessions.entries()]) {
+      if (s.projectId === projectId) this.kill(id);
+    }
   }
 
   /** Epoch ms of this PTY's most recent output, or undefined if no such PTY. */

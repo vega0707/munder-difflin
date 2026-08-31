@@ -183,14 +183,18 @@ export function realtimeActionTools(): ReturnType<typeof tool>[] {
     tool({
       name: 'spawn_agent',
       description:
-        'Hire a NEW agent worker (provider engine + optional role). This does NOT run immediately; it asks for verbal confirmation first. After the user confirms, call confirm_action.',
+        'Hire a NEW agent worker (provider engine + optional role). When defining a NEW job title (title/description/character), it is saved into the shared role catalog after confirm, then spawned. This does NOT run immediately; it asks for verbal confirmation first. After the user confirms, call confirm_action.',
       parameters: {
         type: 'object',
         properties: {
           provider: { type: 'string', description: 'Engine: claude (default), codex, gemini, opencode, crush, pi, qwen, copilot, cursor.' },
-          role: { type: 'string', description: 'Optional. The role/job for the new agent.' },
+          role: { type: 'string', description: 'Optional. The role/job for the new agent (also used as catalog title).' },
+          title: { type: 'string', description: 'Optional. Job title to save into the shared role catalog (e.g. 产品经理).' },
+          description: { type: 'string', description: 'Optional. Duty blurb saved with the role.' },
+          character: { type: 'string', description: 'Optional. Office cast id (jim, pam, oscar, …).' },
           name: { type: 'string', description: 'Optional. A name for the agent.' },
-          cwd: { type: 'string', description: 'Optional. Working directory; defaults to the hive root.' }
+          cwd: { type: 'string', description: 'Optional. Working directory; defaults to the hive root.' },
+          persistCatalog: { type: 'boolean', description: 'Default true when title/role set. Set false to hire without saving a catalog role.' }
         },
         required: [],
         additionalProperties: false

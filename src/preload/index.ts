@@ -50,6 +50,10 @@ export interface HiveAgentMeta {
   provider?: AgentProvider;
   role?: string;
   capabilities?: string[];
+  /** Per-seat bundled-skill allowlist (folder names). Omit = inherit all bundled. */
+  skills?: string[];
+  /** Per-seat MCP catalog-id allowlist. Omit = inherit floor mcpDefaults. */
+  mcp?: string[];
   cwd: string;
   isGod?: boolean;
   /** Michael's prep assistant — send-only; enriches prompts and forwards them. */
@@ -210,6 +214,8 @@ export interface SpawnPtyOptions {
   hive?: HiveAgentMeta;
   /** When true (and cwd is a git repo), spawn the agent in its own git worktree. */
   isolate?: boolean;
+  /** Owning project. Main stamps the active project when omitted. */
+  projectId?: string;
   /** When true, continue the agent's prior CLI session if one was recorded
    *  (provider-aware: Claude/Grok `--resume`, Antigravity `--conversation`). For
    *  Claude the main process looks up the session id from the hive registry and
@@ -301,6 +307,8 @@ export interface HarnessConfig {
    *  Entry point B (hold-Option-to-talk) is handled in the renderer, no hotkey. */
   freeflowEnabled?: boolean;
   groqApiKey?: string;
+  freeflowProvider?: 'groq' | 'siliconflow' | 'ctrip';
+  freeflowCtripAutoselected?: boolean;
   freeflowModel?: string;
   /** Realtime Michael voice loop — true ONLY while a session holds the mic
    *  (renderer session sets it at start()/stop()); the main mic permission gate
@@ -329,6 +337,12 @@ export interface HarnessConfig {
   providerBaseUrls?: Partial<Record<AgentProvider, string>>;
   /** Per-CLI-provider default model slug, used to pre-fill the model picker. */
   providerDefaultModels?: Partial<Record<AgentProvider, string>>;
+  /** Seat hub (MultiCA-style coordination). Mirrors src/main/config.ts. */
+  seatHubUrl?: string;
+  seatHubToken?: string;
+  seatHubListen?: boolean;
+  seatHubPort?: number;
+  seatHubBind?: string;
 }
 
 export interface MemoryStatus {
@@ -577,7 +591,7 @@ const api = {
   // ─── PTY ─────────────────────────────────────────────────────────────────
   /** `cwd` in the result is the TILDE-EXPANDED absolute path main actually spawned
    *  into — the renderer stores that, not the raw `~/…` the user typed. */
-  spawnPty: (opts: SpawnPtyOptions): Promise<{ ok: boolean; error?: string; cwd?: string; worktreePath?: string; resumeNotFound?: boolean; resumed?: boolean; seedPrompt?: string }> =>
+  spawnPty: (opts: SpawnPtyOptions): Promise<{ ok: boolean; error?: string; cwd?: string; worktreePath?: string; resumeNotFound?: boolean; resumed?: boolean; seedPrompt?: string; builtin?: boolean; code?: string }> =>
     ipcRenderer.invoke('pty:spawn', opts),
   writePty: (id: string, data: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('pty:write', id, data),
@@ -587,6 +601,9 @@ const api = {
     ipcRenderer.invoke('pty:redraw', id),
   killPty: (id: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('pty:kill', id),
+  /** Kill the engine but keep the seat on the floor (on-demand runtime). */
+  parkPty: (id: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('pty:park', id),
   listPtys: (): Promise<Array<{
     id: string;
     cwd: string;
@@ -594,6 +611,8 @@ const api = {
     pid: number;
     lastOutputAt: number;
     hasOutput: boolean;
+    projectId?: string;
+    suspended?: boolean;
   }>> =>
     ipcRenderer.invoke('pty:list'),
   /** Resolve a Claude session id to the cwd it originally ran in (Add Agent
@@ -745,11 +764,188 @@ const api = {
       { ok: true; detached: boolean } | { ok: false; error: string }
     >,
 
+  // ─── Projects (multi-hive) ───────────────────────────────────────────────
+  projectList: () =>
+    ipcRenderer.invoke('project:list') as Promise<Array<{
+      projectId: string; name: string; createdAt: number; status: string;
+      defaultCwd?: string; hiveRootPath: string; godCharacter: string;
+    }>>,
+  projectGetActive: () =>
+    ipcRenderer.invoke('project:getActive') as Promise<{
+      projectId: string | null;
+      project?: {
+        projectId: string; name: string; createdAt: number; status: string;
+        defaultCwd?: string; hiveRootPath: string; godCharacter: string;
+      };
+    }>,
+  projectCreate: (input: {
+    name: string;
+    defaultCwd?: string;
+    roles: Array<{ character: string; asGod?: boolean }>;
+  }) =>
+    ipcRenderer.invoke('project:create', input) as Promise<
+      | { ok: true; project: { projectId: string; name: string; godCharacter: string; hiveRootPath: string; defaultCwd?: string; status: string; createdAt: number }; roster: RosterSnapshot | null }
+      | { ok: false; code: string; error: string }
+    >,
+  projectActivate: (projectId: string) =>
+    ipcRenderer.invoke('project:activate', projectId) as Promise<
+      | { ok: true; project: { projectId: string; name: string; godCharacter: string; hiveRootPath: string; defaultCwd?: string; status: string; createdAt: number }; roster: RosterSnapshot | null }
+      | { ok: false; code: string; error: string }
+    >,
+  projectDelete: (projectId: string) =>
+    ipcRenderer.invoke('project:delete', projectId) as Promise<
+      | { ok: true; project: { projectId: string; name: string }; activeProjectId: string | null; roster: RosterSnapshot | null }
+      | { ok: false; code: string; error: string }
+    >,
+  projectPromote: (input: { projectId?: string; agentId: string }) =>
+    ipcRenderer.invoke('project:promote', input) as Promise<
+      | { ok: true; project: { projectId: string; name: string; godCharacter: string; hiveRootPath: string; defaultCwd?: string; status: string; createdAt: number }; godId: string; previousGodId?: string | null; roster: RosterSnapshot | null }
+      | { ok: false; code: string; error: string }
+    >,
+  projectSpinOut: (input: { sourceProjectId?: string; agentId: string; name?: string }) =>
+    ipcRenderer.invoke('project:spinOut', input) as Promise<
+      | { ok: true; project: { projectId: string; name: string; godCharacter: string; hiveRootPath: string; defaultCwd?: string; status: string; createdAt: number }; projects: Array<{ projectId: string; name: string; createdAt: number; status: string; defaultCwd?: string; hiveRootPath: string; godCharacter: string }> }
+      | { ok: false; code: string; error: string }
+    >,
+  projectListTemplates: () =>
+    ipcRenderer.invoke('project:listTemplates') as Promise<Array<{
+      id: string; name: string; blurb: string; roles: Array<{ character: string; asGod?: boolean }>; builtin: boolean;
+    }>>,
+  projectSaveTemplate: (input: { name: string; roles: Array<{ character: string; asGod?: boolean }>; blurb?: string }) =>
+    ipcRenderer.invoke('project:saveTemplate', input) as Promise<
+      | { ok: true; template: { id: string; name: string; blurb: string; roles: Array<{ character: string; asGod?: boolean }>; builtin: boolean } }
+      | { ok: false; error: string }
+    >,
+  projectDeleteTemplate: (id: string) =>
+    ipcRenderer.invoke('project:deleteTemplate', id) as Promise<{ ok: true } | { ok: false; error: string }>,
+  roleList: () =>
+    ipcRenderer.invoke('role:list') as Promise<Array<{
+      id: string; title: string; description: string; character: string;
+      skills?: string[]; mcp?: string[]; builtin: boolean; source?: string;
+    }>>,
+  roleSave: (input: {
+    title: string; description: string; character: string;
+    skills?: string[]; mcp?: string[]; source?: string;
+  }) =>
+    ipcRenderer.invoke('role:save', input) as Promise<
+      | { ok: true; role: {
+          id: string; title: string; description: string; character: string;
+          skills?: string[]; mcp?: string[]; builtin: boolean; source?: string;
+        } }
+      | { ok: false; error: string }
+    >,
+  roleDelete: (id: string) =>
+    ipcRenderer.invoke('role:delete', id) as Promise<{ ok: true } | { ok: false; error: string }>,
+  roleProposeFromBrief: (input: { brief: string; cwd?: string }) =>
+    ipcRenderer.invoke('role:proposeFromBrief', input) as Promise<
+      | { ok: true; draft: {
+          title: string; description: string; character: string;
+          skills?: string[]; mcp?: string[]; source?: string;
+        }; via: 'cli' | 'heuristic' | 'json' }
+      | { ok: false; error: string }
+    >,
+  seatList: (projectId?: string) =>
+    ipcRenderer.invoke('seat:list', projectId) as Promise<Array<{
+      agentId: string;
+      occupancy: 'local' | 'vacant' | 'remote';
+      claimedBy?: string;
+      claimedAt?: number;
+      heartbeatAt?: number;
+      leaseUntil?: number;
+      hostLabel?: string;
+      provider?: string;
+      expired?: boolean;
+      leaseRemainingMs?: number;
+    }>>,
+  seatClaim: (input: { projectId?: string; agentId: string; force?: boolean; provider?: string }) =>
+    ipcRenderer.invoke('seat:claim', input) as Promise<
+      | { ok: true; occupancy: 'local' | 'vacant' | 'remote' }
+      | { ok: false; code: string; error: string }
+    >,
+  seatVacate: (input: { projectId?: string; agentId: string; force?: boolean }) =>
+    ipcRenderer.invoke('seat:vacate', input) as Promise<
+      | { ok: true; occupancy: 'local' | 'vacant' | 'remote' }
+      | { ok: false; code: string; error: string }
+    >,
+  seatExportHandoff: (input: { projectId?: string; agentId: string }) =>
+    ipcRenderer.invoke('seat:exportHandoff', input) as Promise<
+      | { ok: true; handoff: Record<string, unknown> }
+      | { ok: false; error: string }
+    >,
+  seatTakeOver: (input: {
+    projectId?: string; agentId: string; force?: boolean; spawn?: boolean; cwd?: string; provider?: string;
+  }) =>
+    ipcRenderer.invoke('seat:takeOver', input) as Promise<
+      | {
+          ok: true;
+          occupancy: 'local' | 'vacant' | 'remote';
+          cwd?: string;
+          cwdMissing?: boolean;
+          spawned?: boolean;
+          builtin?: boolean;
+          ptyId?: string;
+          provider?: string;
+          agentName?: string;
+          role?: string;
+          character?: string;
+          syncNote?: string;
+          handoff?: Record<string, unknown>;
+        }
+      | { ok: false; code?: string; error: string; occupancy?: string; cwd?: string; cwdMissing?: boolean }
+    >,
+  seatListFloors: () =>
+    ipcRenderer.invoke('seat:listFloors') as Promise<Array<{
+      projectId: string; name: string; godCharacter: string; defaultCwd?: string;
+      agents: Array<{ agentId: string; name: string; role?: string; character?: string; provider?: string }>;
+      updatedAt: number;
+    }>>,
+  seatImportFloor: (input: { projectId: string }) =>
+    ipcRenderer.invoke('seat:importFloor', input) as Promise<
+      | {
+          ok: true;
+          project: {
+            projectId: string; name: string; createdAt: number; status: string;
+            defaultCwd?: string; hiveRootPath: string; godCharacter: string;
+          };
+          projects?: Array<{
+            projectId: string; name: string; createdAt: number; status: string;
+            defaultCwd?: string; hiveRootPath: string; godCharacter: string;
+          }>;
+          roster?: unknown;
+        }
+      | { ok: false; code: string; error: string }
+    >,
+  seatHubStatus: () =>
+    ipcRenderer.invoke('seat:hubStatus') as Promise<{
+      listen: boolean; listening: boolean; url: string | null; hubUrl: string;
+      tokenSet: boolean; port: number; bind: string;
+    }>,
+  seatHubStart: () =>
+    ipcRenderer.invoke('seat:hubStart') as Promise<{ ok: boolean; url?: string; error?: string; listening: boolean }>,
+  seatHubStop: () =>
+    ipcRenderer.invoke('seat:hubStop') as Promise<{ ok: boolean; listening: boolean; error?: string }>,
+  onProjectChanged: (cb: (e: { projectId: string; action: string }) => void): (() => void) => {
+    const listener = (_e: IpcRendererEvent, payload: { projectId: string; action: string }) => cb(payload);
+    ipcRenderer.on('project:changed', listener);
+    return () => ipcRenderer.removeListener('project:changed', listener);
+  },
+  onProjectActiveChanged: (cb: (e: { projectId: string; previousId?: string | null }) => void): (() => void) => {
+    const listener = (_e: IpcRendererEvent, payload: { projectId: string; previousId?: string | null }) => cb(payload);
+    ipcRenderer.on('project:active-changed', listener);
+    return () => ipcRenderer.removeListener('project:active-changed', listener);
+  },
+
   // ─── Hive (multi-agent coordination) ─────────────────────────────────────
-  hiveRegistry: (): Promise<HiveRegistry> => ipcRenderer.invoke('hive:registry'),
+  hiveRegistry: (projectId?: string): Promise<HiveRegistry> =>
+    ipcRenderer.invoke('hive:registry', projectId),
   /** Persist a hire/job role to hive registry.json + identity.md (no respawn). */
   hivePatchAgentRole: (id: string, role: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('hive:patchAgentRole', id, role),
+  hivePatchAgentTools: (
+    id: string,
+    patch: { skills?: string[] | null; mcp?: string[] | null }
+  ): Promise<{ ok: boolean; error?: string; skills?: string[]; mcp?: string[] }> =>
+    ipcRenderer.invoke('hive:patchAgentTools', id, patch),
   /** Rename an agent's display name. Its id, hive directory, and PTY are unchanged. */
   hiveRenameAgent: (id: string, name: string): Promise<{ ok: boolean; name?: string; error?: string }> =>
     ipcRenderer.invoke('hive:renameAgent', id, name),
@@ -760,6 +956,14 @@ const api = {
   hiveBoard: (): Promise<string> => ipcRenderer.invoke('hive:board'),
   hiveTasks: (): Promise<unknown> => ipcRenderer.invoke('hive:tasks'),
   hiveLog: (n?: number): Promise<unknown[]> => ipcRenderer.invoke('hive:log', n ?? 200),
+  hiveRunFlowList: (): Promise<import('../shared/runFlow').RunRecord[]> =>
+    ipcRenderer.invoke('hive:runFlowList'),
+  hiveRunFlowDefaultView: (): Promise<import('../shared/runFlow').FlowDefaultView> =>
+    ipcRenderer.invoke('hive:runFlowDefaultView'),
+  hiveRunFlowGet: (id: string): Promise<import('../shared/runFlow').RunRecord | null> =>
+    ipcRenderer.invoke('hive:runFlowGet', id),
+  hiveRunFlowRetry: (id: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('hive:runFlowRetry', id),
   hiveMemory: (id: string): Promise<string> => ipcRenderer.invoke('hive:memory', id),
   hiveInbox: (id: string): Promise<HiveMessage[]> => ipcRenderer.invoke('hive:inbox', id),
   /** Voice read-layer: recent message CONTENT (inbox/outbox bodies), REDACTED in
@@ -1254,7 +1458,7 @@ const api = {
   /** Persist Free Flow settings (flag / Groq key / model). The Groq key is stored
    *  in main config; entry point B (hold-Option) is renderer-side, no hotkey here. */
   freeflowSetConfig: (patch: {
-    enabled?: boolean; apiKey?: string; model?: string;
+    enabled?: boolean; apiKey?: string; model?: string; provider?: 'groq' | 'siliconflow' | 'ctrip';
   }): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke('freeflow:setConfig', patch),
   /** Transcribe one captured audio clip via Groq (the key stays in main; only the
@@ -1263,6 +1467,9 @@ const api = {
     audio: ArrayBuffer | Uint8Array; mimeType?: string; filename?: string; language?: string;
   }): Promise<{ ok: boolean; text?: string; error?: string }> =>
     ipcRenderer.invoke('freeflow:transcribe', arg),
+  /** Whether CXB_ASR_TOKEN is set in the main process environment (never returns the token). */
+  freeflowCtripTokenPresent: (): Promise<{ present: boolean }> =>
+    ipcRenderer.invoke('freeflow:ctripTokenPresent'),
 
   // ─── Integrations registry (Phase 2 — labeled REST endpoints via the secret broker) ──
   // Bridges the §6 IPC surface for the Settings UI. WRITE-ONLY secret contract end to

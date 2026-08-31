@@ -1,0 +1,407 @@
+{
+  "created_at": "2026-08-31T12:23:22Z",
+  "base": "origin/main",
+  "head": "39524a31ba4c233c6b0cef94bf96e5badf237572",
+  "files": {
+    "CHANGELOG.md": {
+      "raw": "8419939505eecf855bc080b140a7147fa904cfbff627f86c70d99d4f66445169",
+      "norm": "c1d6f13aeb279ed632344a47b26399eca5d9ddca510626e0f7d64442dd08abd4"
+    },
+    "README.md": {
+      "raw": "967d674026b32c118c7d08b36c15f3ee64e30fd7191e4ac1c07dce90412249d2",
+      "norm": "6e3d8b07c7fc23fff96d2be4d927e4c9bcd3b02557895c9d8455e7e2efcba101"
+    },
+    "RELEASE.md": {
+      "raw": "6961be40b94de090837dbd9686de23f065f6331e6a762b9a9c76e96dd53d3f20",
+      "norm": "e1156073e0e70f5f0ab8229624f9fe8a1da5eb0209602cfafbc59022e082bd20"
+    },
+    "build/release-notes.md": {
+      "raw": "082bb061fde02f4ee5d851d55b85a33a31ec9011d11ad5e7535265c583ed63a9",
+      "norm": "e542d3b5b11b4523e8907d086ef4b27fae5683b33f03f3c23c0900cadf45bc80"
+    },
+    "package-lock.json": {
+      "raw": "f54702fcdf052e0b4dc0be18774528474495b98a47f15cd1ebbe9ade9c22b1ee",
+      "norm": "86288091f7854c37b8442f241ec66403a3e51ed1b8ecb075ee57c02780ce265e"
+    },
+    "package.json": {
+      "raw": "cebeb73be3282907d19f5619c9d13d3b54cffa9cb6233a3832a1662b901ef365",
+      "norm": "b528ec3b651a027d2afdec20acea335963f9f9b97954d04483e67e91a84e41e0"
+    },
+    "src/main/builtinAgentHost.ts": {
+      "raw": "a4a94c443c80afeb20a996953129746b58b131ba6fcca1f52d2e17018e2d27bb",
+      "norm": "3b54de795de8fa735ecc93e9aa570e9865dfbcf38efa830c6ca62fb6f484c05d"
+    },
+    "src/main/config.ts": {
+      "raw": "8ab442b1c76525670cc0cd509a9fd7fbb6b0a3b1f2199846ae5dbdf59c61fa4b",
+      "norm": "a5a47e6902b6115ce36f11c7a3bf9aa6c9950c6806adc0e19b85f84a879468c1"
+    },
+    "src/main/db.ts": {
+      "raw": "61b5a32071de68c656c95fe28bd036314c5a0de8876a198b3457138073d67295",
+      "norm": "0ffcd3d9fa894ff4a9f4be20da6eb76d2547d1dfcd5aa7117b02cd67994fa399"
+    },
+    "src/main/freeflow.ts": {
+      "raw": "f9aed80ca6e3e0da50536068727a505c0c3892e77a2ee410784dc56641f8d6c6",
+      "norm": "691ab43ba458d76f9ccaf317119b5a7ab8db8f4bdf2d474eeb8618c9b65a79e5"
+    },
+    "src/main/hive.ts": {
+      "raw": "33699ac4c0f0671663650dd3d202e8d34e8b34b33f31a2c42386d7cdda7b4153",
+      "norm": "14b78fbb3051103176c6ebb207748d827a6c07655466409e781ac76076fa8e10"
+    },
+    "src/main/hiveRouter.ts": {
+      "raw": "4a061e13fc07c9d4abaa54e59e0f4606136266946bf78a729a8e28c58b49ea65",
+      "norm": "2ef30529fbf4005c427a3d536ea510aaa18d22a0847f0dd2a26c3ee1ddc31d7d"
+    },
+    "src/main/hooks.ts": {
+      "raw": "f1681f319b5795560db11c7abd4699161e5b2f09d51d9826277f0866ccbdaa3c",
+      "norm": "37167f2677ddd55c0cca7ca509600752eb878a26f3a3c00900df4f57d319b567"
+    },
+    "src/main/index.ts": {
+      "raw": "14ddb67d77a1458f890892fafb402505a3187fae2d093ab58da63402be903f4e",
+      "norm": "17b54769592f80f3c5a0f6b5a7b466123e5e03e7426235b85a38789c911db3c8"
+    },
+    "src/main/projectRegistry.ts": {
+      "raw": "736fb3ba4aedecf92d893b17a2574a5128468ee659c78caa5a7cb9d7d22670cc",
+      "norm": "673bb8df4d302912cca6f27082424458b6e4fd6074e34d72dd9c8c30aa5f23af"
+    },
+    "src/main/projectTemplateStore.ts": {
+      "raw": "eb1b9867749a444822568c47e20fb0e85c95d5c3e4b04e59cb0d2d45b63410ba",
+      "norm": "35f0b34903d739655e24f3ec849891d06ed7ed3377c1bd435adf6fdd3f04cc09"
+    },
+    "src/main/pty.ts": {
+      "raw": "788ddf531b36bc43b86c6d0a237f3e256e7d65bb65dc9c18a61e4ed3b920f416",
+      "norm": "68b8514df52ec4c5b1f5da6d891df792cee4a8217d547aaad4a6d5de3990f9b3"
+    },
+    "src/main/realtimeActions.ts": {
+      "raw": "f4e1ce988eabcd9e5e42f2537451c9deed4750b87500274fa21e6344f02f7e22",
+      "norm": "e3de41c41df1b21a569fe33821b411c2f5f0c5a83b1a6c097fbf1d2b1683d6ee"
+    },
+    "src/main/roleCatalogStore.ts": {
+      "raw": "159d3bade16276058ea8a7bcac51ef91a5c5d9250acf5a8a53a2d0997d09aef0",
+      "norm": "30115a02063283383769279be2002b751947e2b8348b09419ae0bbab1bbb5c60"
+    },
+    "src/main/rolePropose.ts": {
+      "raw": "c6c916c6ccea74497dc20b0631bc2ceb3f14fd609c33d77e297dfba99740a34d",
+      "norm": "d9cec4b365c5da9e3383eb753ed26ff0217ad430ea975b5f170ca9d5d02d9c39"
+    },
+    "src/main/runProjection.ts": {
+      "raw": "6605bc15864283d09f61ac26cce5d1749d90e11dcd9fe4ba651f2197f3e6e3d3",
+      "norm": "d0850f71ac4fccf0a7ab6f2d3b343bf0851ca627136d7ae3f4ec99a897d8d7e7"
+    },
+    "src/main/seatBoard.ts": {
+      "raw": "3665d85ad3660ac60b822c3aae4738746a5fec35e4fd6525968aef0a3d59fad2",
+      "norm": "7a6afdffb69d63bd3cea38971bb5f8f6b40b6a47dcc5bd4d5bd5561f9c354d0e"
+    },
+    "src/main/seatHub.ts": {
+      "raw": "2f92adc7aedf8629233d8455ae051a7d3792f86e6a0a923333872b6f88b2c846",
+      "norm": "826651b40de17062bdd8f6746672c9188c4a548bdb41679855dd2fee9c69d44b"
+    },
+    "src/main/seedProjectCast.ts": {
+      "raw": "624e0c1ade2d5e41e21e90bdaaf9b35d24f1cc018bf47d28b9665458b73ab617",
+      "norm": "62b17656b6810ad48dbef658105df48aab1013b296062e56c5ea6318ee43924f"
+    },
+    "src/preload/index.ts": {
+      "raw": "2ff8e561eadeef422e63c995c41f0bab630cc9847b1705690ed315ea0701e62a",
+      "norm": "2ec4f6eb0cdb91dda87b2ed40ab1d7baa5f6556f1cbe11be77fd7e71a0a8917d"
+    },
+    "src/renderer/src/App.tsx": {
+      "raw": "14715cb80ff153722a448a4414fb8aa4fb7f412ce6d2255973a8a8ba11319f84",
+      "norm": "9ad74e0222bd79b635ca21f309311510c0af6664eb5ea792cc2600ce4a072d1c"
+    },
+    "src/renderer/src/components/AddAgentModal.tsx": {
+      "raw": "fe46dc219c5484ed6ff777f6d3537fb0a6d122c50be38d721feb15d0cffe4e5b",
+      "norm": "871f7644c6e90cee3262e375526d94f99c99c2536351281e5db57a123faac7af"
+    },
+    "src/renderer/src/components/AgentDetailPanel.tsx": {
+      "raw": "71186e4cd8c2b46f1a0874fcc08d9f367528981e08088aa5c7adb4cf6aa70efd",
+      "norm": "8f676fb6a2e103acfa7215b80123f6212f9e6e47c98f9d4f7ce3d3c72b228d92"
+    },
+    "src/renderer/src/components/AgentStrip.tsx": {
+      "raw": "ea50afdc4c6d85ce82abbf401811b2f4ba1b0c5c944393cbb537fbada873be8e",
+      "norm": "6851975d493716d90d5da98cb1f0140f98894705a01920100fd2483b97eb1c3d"
+    },
+    "src/renderer/src/components/AskMeTab.tsx": {
+      "raw": "981d1fa49587efdd06e0598d000bf7c06c291e6cd2c8ac8d1d1329e56bfc2cdc",
+      "norm": "8819d936751cff8070903169292cb0510d940e9e3df8ab739a9df7e2d8d01651"
+    },
+    "src/renderer/src/components/CommandCenterPanel.tsx": {
+      "raw": "1b36bbf2508db0b8afd995291b13bac77af20e92ae3d1bdce7640390cbe5c80b",
+      "norm": "12aec3ed40b7ae9abdf1ffcaff239b52f5cd6629c4b798cd4b53f73779714434"
+    },
+    "src/renderer/src/components/FlowTab.tsx": {
+      "raw": "60b63537adff445e462ce42e7142ba40a7ca23173cc00a973123cbf47b7852d9",
+      "norm": "6ba7ed1f21bb4a39a58ab662ca648ac707d68d6c465f351272018df9ec60021f"
+    },
+    "src/renderer/src/components/FullscreenTerminal.tsx": {
+      "raw": "8c0ebbc8b754e3aaad52644ee7ea2932b69e0c30c0b16e43423088ff06771f71",
+      "norm": "21b94fdd6920bcd69117b4406055bd1fd878651d285a58541ccc27e9343c9baf"
+    },
+    "src/renderer/src/components/MessageQueueComposer.tsx": {
+      "raw": "750669a4cc8e21c7249e6a3568b0408c8811179132eb1c1828d79dc79f83307e",
+      "norm": "dc2970e418c69387f4deeab83d8810b3b2a9061fb71478c3f6ddb91a6fb7aeaa"
+    },
+    "src/renderer/src/components/OnboardingWizard.tsx": {
+      "raw": "311dd0c9959f33b62322f35bffb13e3aed52017b1e77f3dbc7065ea2625c7bbd",
+      "norm": "efcd37cabca5e3942a800c2cac8360f51f1d5bcc5a692dc9d2cc83652f40275a"
+    },
+    "src/renderer/src/components/ProjectCreateDialog.tsx": {
+      "raw": "63132ab2e3658a4f88dcf9964842dfe2265f85f8b1302129660520bb437d1dbe",
+      "norm": "48a44d6783e8125490f5fb645c6f654aa150d0ec3ee98bab04449894a3f0777b"
+    },
+    "src/renderer/src/components/ProjectDeleteDialog.tsx": {
+      "raw": "429690e17480a12a1e1b1664ebf66308e5ddf509184bae574e61fb8c43b50ace",
+      "norm": "ab0164eca3ef0a5a2f26e56b103236677eb336d7c793e516949846fd9a398b48"
+    },
+    "src/renderer/src/components/ProjectTabBar.tsx": {
+      "raw": "1d5060e4f96a7eadbce9752ba459de1a12823d6938c0e853c4e54fc7577da05c",
+      "norm": "18c9821268edb328fbf095820a56b5b049759593bcf369dab9bb832fde302ef9"
+    },
+    "src/renderer/src/components/RolePickerPanel.tsx": {
+      "raw": "e9790ae5787b793f5abd516c17679a6a4102c69498e0c7ed3abdea30f60b1123",
+      "norm": "26e59434cd85ff47e9f3074b35da4741624717e0a6b964ed2ea19a4886dc101f"
+    },
+    "src/renderer/src/components/SeatToolsPanel.tsx": {
+      "raw": "1a150992ef4ab3d6a6108cdcd72bdf3a9a23f595b768b9e18928dc4216f68187",
+      "norm": "829bae65e83c4d637ec86c398e38d9a3a98a1037421d5fc57e572396ac762d8f"
+    },
+    "src/renderer/src/components/SettingsModal.tsx": {
+      "raw": "0300383399019b5a9dfccf3efa1b873d77dff2aeee2d492fa25fee6993e312c8",
+      "norm": "cf1195fcfa5be1b097792a1978246d6bc5fd3d7e215d94edb4d1f0b0253e013a"
+    },
+    "src/renderer/src/components/SkillsTab.tsx": {
+      "raw": "40f2eaf740aa76dd9e13f0c23e21343a7a915356b2d2aa046e36fb36761f0dbe",
+      "norm": "b24912176b1356afff9e44d0d1716490cdbcbf559e2d3f649d2aa4a84daf5ced"
+    },
+    "src/renderer/src/components/TaskDetailOverlay.tsx": {
+      "raw": "085359740716d45ffecde1477de1870c1cf2726cc1ad7033e289865bec437fa0",
+      "norm": "5571e0265aff3a65603b15d431b3a8c6b0b2fd6e23858580ece6387265fbfa27"
+    },
+    "src/renderer/src/components/TasksKanban.tsx": {
+      "raw": "872ec6dc3420e7175e1e6997e14c7c971877579e3d6efdf09faa2b0cd67a569e",
+      "norm": "3c5c13cbf1bcc895fc35971bee6cf3f321d10cb00d181afd1aca97c7aaeea28b"
+    },
+    "src/renderer/src/components/hiveTasks.ts": {
+      "raw": "067134c0d031d37d90d8727c81231163629bdec0eee94a6655a1268ae0f6e1b9",
+      "norm": "ef6b8237f1c69b067e864f30f6d7f167fbde30cc75962767e732fcf06bccfc00"
+    },
+    "src/renderer/src/freeflow/recorder.ts": {
+      "raw": "01f33bcd20b8f1e3096cf509f7dbe46664c19d32112528c9882ea2c41d94db2f",
+      "norm": "1e3714c99d8ab171187ae70f84d7f8b1f54fa223417e6445517fbd8a3412a421"
+    },
+    "src/renderer/src/hooks/useHive.ts": {
+      "raw": "7a2436936c80fd9f7c51d16faae81c022f385bc159b4a68e1f009f9f6c808fe4",
+      "norm": "49bb7b2c13fdb7e58959d2acc59a623c60b5e1b5743773b376eadcd71de65d28"
+    },
+    "src/renderer/src/hooks/useLiveSlots.ts": {
+      "raw": "ff20e03fa51993a007e3f15dd6631868f7730721b0d0bb8c415eef5c92b423bc",
+      "norm": "308c73d078989991886460ff46d90bb66ad6e861183424a51ea3213bb33b5615"
+    },
+    "src/renderer/src/hooks/useProjects.ts": {
+      "raw": "cce187163163fddb5698483d74669039f20efb1ec823bab7f8574f5ca314e57b",
+      "norm": "06936b21ce3f79c7c0c8132ba5ea07b7cca2d668cc35622e92e8ecf0217f3388"
+    },
+    "src/renderer/src/hooks/useRestoreTeam.ts": {
+      "raw": "2121f2881f7391a000df8ab9ce6cd9638317367d243fd6d783f6a85b677a3506",
+      "norm": "50e44519454deeb3c94f168f7005b9a6a1ca0b675ec7b46070cc46742b21514c"
+    },
+    "src/renderer/src/i18n/locales/ar.json": {
+      "raw": "f91aea1caf057718a11ffe0883695b2d54dfbfe985e9cc9e26391302f8a986f5",
+      "norm": "9c495534a5391daa421fdc02bc5dff18e6000665a5f4c38ab676058609518ef9"
+    },
+    "src/renderer/src/i18n/locales/en.json": {
+      "raw": "e71fc4f01a3be136ab363b29551a92002a07a4f35631d0e9ef1876069e95204a",
+      "norm": "71ffe3f9e993c84cab68103ded7e20f037b4b484d78afd93d83405b6d911b272"
+    },
+    "src/renderer/src/i18n/locales/zh-CN.json": {
+      "raw": "124a5c988deae3ea3b88a881755d80337006d6f31fc5b1997a5747b402b00bcf",
+      "norm": "f5382fffb00ddc961cf9866e5506bc29c6c13a491ffaafe79403432ad8f45c03"
+    },
+    "src/renderer/src/lib/spawnFromRole.ts": {
+      "raw": "65d01cf20eaadc2bcc81911db86f17e4de6ccc38a445c67f5f9b60144d69f9dd",
+      "norm": "5e601944d6416dbaa9ed1c27ab47cc040574486f781909937eaeaba4a7604c2d"
+    },
+    "src/renderer/src/realtime/actions.ts": {
+      "raw": "4cc28437c80f4b99ca17c67e1969b169d65f0149a8ff857644d0da31bdf29e15",
+      "norm": "53b0a5dc22bf680bc95230a23ccbc07efdb16f2aa7d71657f201febafa0765f4"
+    },
+    "src/renderer/src/store/config.ts": {
+      "raw": "51eb3969043492abbed08755d696b13b89cb5c68340eff9856501c3bf2d3ea20",
+      "norm": "c2407643a42f75172624f40d47fac5fffe32f78caa6ef37d69ed4c954185a45e"
+    },
+    "src/renderer/src/store/store.ts": {
+      "raw": "fe1e9e3475fe80537fabb2a1758c4414509c9863a96b912be17b509a288bcdf9",
+      "norm": "d743782fcbec5dd1829196a56f487e7db1fa969fbba725821cb2cceb3b4bbf39"
+    },
+    "src/shared/agentProvider.ts": {
+      "raw": "89a687f6c08401e81fd6fb7d49782a6c2dff7bdd0c8e44523fb71c7f39578a4b",
+      "norm": "39270957abbe6c224ba604267501fc37dfe44ef371ff1c59a5568ba9fa574be8"
+    },
+    "src/shared/agentRole.ts": {
+      "raw": "0e5338f8710e6119d8a2302c91138cb54bc7a06bc16f8eb91147e69d6d5a365d",
+      "norm": "f955ab5597e4d69026dadbaf70d1c12df5f8afd8583fa7a96c0f4d823afdaf38"
+    },
+    "src/shared/builtinAgent.ts": {
+      "raw": "fee75c39d2a2794dee606a36819b5912a2deb01bb4f14d044ae9f2e24253dfb6",
+      "norm": "ef891566fbce797005337643ef110bf85f2b24f0e26b68e1741f1b7172b83d54"
+    },
+    "src/shared/engineAvailability.ts": {
+      "raw": "970c1e3efced55097d78cd0820ac208178a49d6194652d1e1724bf11690c1d96",
+      "norm": "e8b6592351ee04df268345edcd7e8e10968721302def9a394543915550d9f613"
+    },
+    "src/shared/floorAddress.ts": {
+      "raw": "8c484b62d744d7f4c8e26626b1b76ddd6ce5b6e98c0e15c2ebe73e1ee3a8d3c5",
+      "norm": "d4ab40466f7fdee1654dd188415d3b8ac60527a6c138795d3e8f4150960033e1"
+    },
+    "src/shared/hiveMessageActs.ts": {
+      "raw": "6bc5787f8b476895809a7561b973ffaab3c9d44e2a599173420f7b457a78f33b",
+      "norm": "0f636bad0d4f4450a6b0bd0c0a4421b4d3c5ad85331baa87b2486287f570640b"
+    },
+    "src/shared/hookEvents.ts": {
+      "raw": "f28436f22091bf1240d49dd2affa6c6ed7b4db52c330ae9f394a4f604dddbbaa",
+      "norm": "5c05003a75605f9152ebe3926fd8d7c354e0fde68bea4c7efbed65c22bb16556"
+    },
+    "src/shared/projectTemplates.ts": {
+      "raw": "264ab9b657bee6d16d9ee2f4a8acd2aad79b6a1509d62fe4855b2f2c279e038b",
+      "norm": "8ef9d1e870a6da0373c0bd583e860a7d28ab5491392808911fbca4f1b2acbc66"
+    },
+    "src/shared/projectTypes.ts": {
+      "raw": "5bf2f24f16c2a29bdfe0fb8741cf473aa4caf1c58ba0627080539dbd7b1b16ff",
+      "norm": "092c83526c5b3d43594173bbb31813c2649067bee1ff559fb37851cae568e789"
+    },
+    "src/shared/providerAutomation.ts": {
+      "raw": "6486393e5a022d4792728fc024e0ff1c03f27cf7b138db9484a764e116fe0b15",
+      "norm": "761696a2126a7ac040c8f2d6e9502357f39a1d5082fcd1e7831ee102fe8803a6"
+    },
+    "src/shared/roleCatalog.ts": {
+      "raw": "cf5ed3c8991fdea0fd3abcc584367e79e8a4eeef3fd143a266c00b45834397e8",
+      "norm": "5af14760b6e0a2cbe1676cb3dcfe37c946d94dd6e8c15896c1c0baaec5930a80"
+    },
+    "src/shared/runFlow.ts": {
+      "raw": "c9ea5b11c2492c23f8140a989575bd0ac89e39341fabb3f665f639df8fe1416d",
+      "norm": "3c93cab8c8e90c93a83b6930179b8348b3ddeeda660c503488d691c94bb20f5f"
+    },
+    "src/shared/seatTools.ts": {
+      "raw": "f6d1a967b551f826e4ec0e46fe5bbe2842823e6262230d63ca0dc84634e2129d",
+      "norm": "44df0c76135cd4ba73c70ad4a20dda13d1953a07fb7a2c75836c2146c3c7b059"
+    },
+    "src/shared/seats.ts": {
+      "raw": "8ad5bc53788c3ec7b36bcf0ba8f9315183cf5461ea59394d99958abac22c31e4",
+      "norm": "808a37982354cfbe1c5ae0f6962866f56ff4687424a86e1499b5e6caa39ce9cf"
+    },
+    "src/shared/sttProviders.ts": {
+      "raw": "4a4fbb2e679e0c67dcb051efaa0ab80363b92aa3eb091aa7c86bd3af9b8e3020",
+      "norm": "71203cbb146af1a6a3a217e56780ea8a4c5f0a8c65118cd3d386ab3344d5df95"
+    },
+    "src/shared/wavEncode.ts": {
+      "raw": "823aba4110752419da4a10a96673261f39b85b8a88089f864ff1324c58c9eb08",
+      "norm": "2497c2a88202d4de0cd9f26ab0d56320c431391e8f662754f3acc8ae58145737"
+    },
+    "test/activity-log-scroll.test.cjs": {
+      "raw": "3a42a1fd235d87cb747af8693bb934ce7bebb04a587f61109e8b4cbc47e526ef",
+      "norm": "113bc427dc4c7813c406f919af59c83ebfc0d5810de4a6649927554af6734032"
+    },
+    "test/builtin-agent.test.cjs": {
+      "raw": "24b18c69d25e3dafa03281e3a572b52f72000bdb5cb2dcf4b3d97275cf337af4",
+      "norm": "d66ac9c39fc9672069d7dd96e50286c291b97fd6a66e08f17c35404becdf92f4"
+    },
+    "test/engine-availability.test.cjs": {
+      "raw": "13f853318a02dc6623c8e68b0e00a1782acf42f0566502c84335f916bf732f76",
+      "norm": "9e731795bd6f433095654b815962eca2df623c520c50d70d18526f0a9c66ca71"
+    },
+    "test/floor-address.test.cjs": {
+      "raw": "1c0f7ca5486740de0306d4f6c179289db99c09fe7783da56340e11aa71d98815",
+      "norm": "abb051d86ea578605eb8fb808bfbeafed48f8a7e94020e4ad58100d05d9fb97e"
+    },
+    "test/flow-tab-structure.test.cjs": {
+      "raw": "d4973007145071373a00ce49a5c335d989a236842d6d7deec605324da89b4149",
+      "norm": "34a040fc2cf07c63c42e14dc685dc49de2d93bc1171cb227a22a55e478fc8954"
+    },
+    "test/freeflow-ctrip-bootstrap.test.cjs": {
+      "raw": "80a2309a98c1636fbab8279a0df4f6ba948480ad9dcdf6766821acf6bc2e3292",
+      "norm": "7ae9c360e963e75c2529aa00a5534d547d013ab4039f525248a42ed15a725c7d"
+    },
+    "test/freeflow-ctrip-integration.test.cjs": {
+      "raw": "e5233a16c49c2e646e928d7d3c8a624e8010a580e91e2de5e03f02263185392e",
+      "norm": "a21e75e0a076d7d712e8a915045fb07fe6087f6971a4c3c8dff27e8b6d8f387b"
+    },
+    "test/freeflow-ctrip-transcribe.test.cjs": {
+      "raw": "8f8325b1480810c7f497ba2e023ea25a2e38e5e333355bee933bb6b888beba35",
+      "norm": "2937201d92b17d7a78fb7b2673db18860106d48cd6e327eb924e8fb90d454bac"
+    },
+    "test/freeflow-transcribe.test.cjs": {
+      "raw": "2c969c645f80a7701161fd55f600a39b10936a3dce2a0f27514e34bd85c60d27",
+      "norm": "d5687540541feb9392205746799ab7b4af2e5dcebafd286748406f18cad01cc3"
+    },
+    "test/hive-cross-floor.test.cjs": {
+      "raw": "c1902c81733c0a30de19530f4e919c09ab67cc08b2f84c691b88bb45666763ed",
+      "norm": "05932b6696901b93ac52ef53c3626aedab1197e9fcc39d2b71a8aa4fc3b296b9"
+    },
+    "test/hive-project-root.test.cjs": {
+      "raw": "8e72407af38949d75a2d4e97baa1d21c405653f6aac2faa2b949fc291d272be6",
+      "norm": "4d9e76ad3b90f66093ffd1225f266715212c67d124d2fb62ef3781bc992440fe"
+    },
+    "test/hive-promote.test.cjs": {
+      "raw": "d0c27e9bbc99d500ed697f813b80ef94f8c2906a9f8add33e6966c2854a9dc0b",
+      "norm": "6e5441e6564be8f6d052e8fb79138357fd2419faa8558c35c23eca394c39204b"
+    },
+    "test/project-create-god.test.cjs": {
+      "raw": "d24bde0115ceabcfacac31bcea27b94a0bd1ca8496cc0b7d4b8abf51093a20fe",
+      "norm": "cd9769a0ad8fae1a17da4409f532efd42f62af4053201bae6d35760d3585ddb6"
+    },
+    "test/project-migrate.test.cjs": {
+      "raw": "99ecdf6b0091c30858b160b12de20ce1fec1b81767fb3b3d0aba3a896c3ccf69",
+      "norm": "ff2da4a1f4950a47f77252d1fdda8a8a2d76cf08befc2f7c0ed0359aab241f3a"
+    },
+    "test/project-persist.test.cjs": {
+      "raw": "05369c4f8e24987bf6ba88093a7a58bf79f289237d02e46ea25378ee24a1cf86",
+      "norm": "7ede3e573049f600ec5d0d13f6a1196560f8593057604d231a8c74dffbdde50b"
+    },
+    "test/project-seed-god.test.cjs": {
+      "raw": "e419a645f3ddcdf543af4908eda897e69152c4f53b5b28ddba5edec75ebda867",
+      "norm": "deffc0392eda559aa47360afc45e05eec67fab33905adcb631766180ba1491ad"
+    },
+    "test/project-templates.test.cjs": {
+      "raw": "95ee6c6d5d7c63fea5c44efb2a31141c173f0ba6b9d1d4d6bf2c4c1c44c6fcbf",
+      "norm": "a07d112bf6272deb912975aec49913e6124d619e1e7d954df305e9db437dc267"
+    },
+    "test/pty-suspend.test.cjs": {
+      "raw": "788e5ab85e2dc25fa62449668cc69854dd64cc30980368f6e320331a4d1c11a4",
+      "norm": "216a61fee4bba0fa41893a72b38dd3e61bec6e8a30896e038ccdffaf794f2cf2"
+    },
+    "test/role-catalog-store.test.cjs": {
+      "raw": "fb921dc24048b899cd862752270b1f87506d5ccb015dd9ff8f838dec3af1510a",
+      "norm": "65aa737defd37535ab6f5d8c4996382f1d1bbed66a6484b020bffc44f426f6d6"
+    },
+    "test/role-catalog.test.cjs": {
+      "raw": "efbee83168727213bbff87cd1ac64c8fe258b9310ee8f3c45e86f54e9114c927",
+      "norm": "b8a9f701fb00d1be4aae3d34a2c8fc7e3ac2e30f4f11379eb0f1c35c5b6e6160"
+    },
+    "test/run-projection.test.cjs": {
+      "raw": "737b3553cb96f2d3f02f0482f878b5cf4a0a8e3ae99a87f1207d6405414a2bc2",
+      "norm": "eeb647f404b703c72056249a4bae3189158f2e322d8ef78ce15136a2a492f6a7"
+    },
+    "test/seat-hub.test.cjs": {
+      "raw": "023efd598786d123c1b0968de47f1d7cb539a3fd8c75fcdf9f627a295320e0ad",
+      "norm": "cb54ac1e4c495af4e16097b130faf7d4a9ae89142c9e80708631f1db06ded40a"
+    },
+    "test/seat-tools.test.cjs": {
+      "raw": "4484511b07dcd5dbb56ba89c5ef67c5c71081b9d04a63554f90b14f4918bb579",
+      "norm": "221cf394fa3c4d3143d80fb6ed3badc0bb66bd6660dbedef550897255a0153f0"
+    },
+    "test/seats.test.cjs": {
+      "raw": "d0d30930a3f68d4a776b159b612462fdc51c3a641972e08b77d858e0f4ead3a3",
+      "norm": "b5b91c611c23de97f156e4ddc8208e636a77319451e8679ae873411e3f5fd8e1"
+    },
+    "test/stt-providers.test.cjs": {
+      "raw": "c6255f7ee1b624d884c660f2715fac791f974fbd20e0976112264d393f36f694",
+      "norm": "8c7de7f84ecc0c989522ddc00a99ac7b5b811f4d5f849da01509f7ffa4388a1d"
+    },
+    "test/telemetry-funnel.test.cjs": {
+      "raw": "2395a433db8a329b714fc0510aa8b03eacb2340df9307c618327af6bbe1cff6b",
+      "norm": "aacc2b5c32cf6115de0de57230df1478547cb961c7eb902832b7d5203f1910e5"
+    },
+    "test/wav-encode.test.cjs": {
+      "raw": "2d6cdb46aa2ebc4d8e610789eba70ebea0283e78c66f9f81d73acf7d88b4f68f",
+      "norm": "0e9f426a24808a6b95ad824d7287abb685bc0211a89747fac149cbb97be56d30"
+    }
+  }
+}

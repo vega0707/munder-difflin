@@ -5,6 +5,8 @@ import {
   providerPreset,
   inferAgentProvider,
   isClaudeProvider,
+  DEFAULT_AGENT_PROVIDER,
+  resolveAgentProvider,
   type AgentProvider
 } from '@shared/agentProvider';
 import type {
@@ -20,6 +22,8 @@ export {
   providerPreset,
   inferAgentProvider,
   isClaudeProvider,
+  DEFAULT_AGENT_PROVIDER,
+  resolveAgentProvider,
   type AgentProvider
 };
 
@@ -104,6 +108,8 @@ export interface HarnessConfig {
   /** Free Flow voice dictation (mirrors src/main/config.ts). */
   freeflowEnabled?: boolean;
   groqApiKey?: string;
+  freeflowProvider?: 'groq' | 'siliconflow' | 'ctrip';
+  freeflowCtripAutoselected?: boolean;
   freeflowModel?: string;
   /** Realtime voice idle auto-disconnect (ms); default 180000 (3 min), 0 = never.
    *  Tuned in Settings → Realtime Michael; the cost cap stays the runaway guard. */
@@ -116,6 +122,8 @@ export interface HarnessConfig {
   agentTokenCaps?: Record<string, number>;
   autoDeliveryPausedAgents?: string[];
   maxTurns?: number;
+  /** Global live-PTY cap across all projects. Default 5. */
+  maxActiveAgents?: number;
   circuitBreaker?: CircuitBreakerConfig;
   /** Enterprise Knowledge Graph (multimodal context for agents). Default OFF. */
   knowledgeGraph?: KnowledgeGraphConfig;
@@ -149,6 +157,12 @@ export interface HarnessConfig {
   orgTrigger?: OrgTriggerConfig;
   /** One-time guard for the main-process triggers migration; read-only here. */
   triggersMigratedV1?: boolean;
+  /** Seat hub (MultiCA-style coordination). Mirrors src/main/config.ts. */
+  seatHubUrl?: string;
+  seatHubToken?: string;
+  seatHubListen?: boolean;
+  seatHubPort?: number;
+  seatHubBind?: string;
 }
 
 /** The Sonnet model with the 1M-token context window — used for Michael's prep
