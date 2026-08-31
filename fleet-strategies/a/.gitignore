@@ -1,0 +1,3 @@
+# refs/ is for local upstream clones — do not commit large trees
+refs/
+!refs/.gitkeep
