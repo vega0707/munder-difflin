@@ -1,97 +1,147 @@
 ---
 title: "Your First Hour With Munder Difflin"
-description: "A minute-by-minute walkthrough of your first hour with Munder Difflin v0.4.4: install, the clone-of-you onboarding, your first brief to Michael, watching the floor, approving your first escalation, and leaving a schedule running."
+description: "A minute by minute walkthrough of your first hour with Munder Difflin 0.5.2: install, setup, your first job for Michael, watching the floor, answering an ASK ME card, reading a diff, and leaving a schedule running."
 date: 2026-07-03
-updated: 2026-08-20
+updated: 2026-09-10
 category: guides
 categoryLabel: Guides
 type: Non-technical
+pinned: true
+pinOrder: 1
 primaryKeyword: "munder difflin onboarding"
-secondaryKeywords: ["getting started with munder difflin", "multi-agent harness tutorial", "first hour with a multi-agent harness", "ai agent approval queue", "scheduled agent missions", "munder difflin skills"]
+secondaryKeywords: ["getting started with munder difflin", "munder difflin tutorial", "first hour with a multi-agent harness", "munder difflin setup", "scheduled agent missions", "munder difflin skills"]
 tags: ["Guides", "Onboarding", "Getting Started", "Multi-Agent", "Local-First"]
 author:
   name: Chaitanya Giri
   initials: CG
 faq:
   - q: "How long does it take to get Munder Difflin running?"
-    a: "About five minutes. Grab the signed build for macOS, Windows, or Linux from the releases page, or run from source with Node.js 18+. Onboarding validates your setup at the very first step — as of v0.4.4 it checks your home folder immediately instead of failing four steps later, and the Prerequisites page in Settings shows live status for every tool an engine needs, with a button that asks Michael to install what's missing."
+    a: "About ten minutes if one coding CLI, like Claude Code, Codex or Antigravity, is already installed and signed in. Download the build for macOS, Windows or Linux, answer a short setup, and you are on the floor. Settings, then Prerequisites, shows anything that is still missing."
   - q: "What do I need before installing Munder Difflin?"
-    a: "At least one supported agent CLI — Claude Code, Antigravity, Codex, Grok, Kimi, Qwen, OpenCode, Crush, pi, or GitHub Copilot CLI. If you're missing one (or git, Node, uv, MemPalace), Settings → Prerequisites shows exactly what's absent with the platform-correct install command, and can hand the whole job to Michael."
+    a: "One supported terminal coding CLI, installed and signed in. Twelve are supported: Claude Code, Codex, Gemini CLI, Antigravity, Grok, Kimi Code, Qwen, OpenCode, Crush, Pi, Copilot and Cursor. If you do not pay for any AI subscription, Antigravity is free."
   - q: "Who is Michael and how do I give him work?"
-    a: "Michael is a clone of you — the boss of the agents, while you stay the boss of him. You type a brief into his terminal (or talk to him by voice) and he adjudicates it: creating tasks, assigning them to workers, routing messages between inboxes, and escalating only critical items back to you. He seats himself in his office automatically on first launch."
+    a: "Michael is your clone, the boss of the floor, and you stay the boss of him. You type what you want into his terminal or talk to him by voice. He breaks it into tasks, hires workers, routes messages between them, and brings you only the decisions that need you."
   - q: "Do I have to approve everything the agents do?"
-    a: "No. Michael resolves routine requests himself so the system stays autonomous. Only critical items — spend, destructive operations, scope changes — land in the human-in-the-loop approvals queue for you to act on. A circuit breaker and per-agent token budgets guard the rest."
-  - q: "How do I review what an agent actually changed?"
-    a: "Open the built-in Monaco IDE from the title-bar IDE button. Its git CHANGES rail lists every modified file, and clicking one opens a read-only side-by-side diff against HEAD. There's a per-agent git tab with status, log, and commit graph — and since v0.4.4 the IDE previews images too, so a design change is as reviewable as a code change."
-  - q: "Can Munder Difflin keep working after I walk away?"
-    a: "Yes — that's the point. The Triggers tab in the Command Center holds recurring missions with a label, interval, target agent, and body, plus a heartbeat that re-engages the floor when it goes quiet. It's local-first, so the office runs on hardware you already own — and the app keeps itself current, telling you exactly what's in each update before you restart into it."
+    a: "Only if you want to. In ask first mode agents pause for tool approval, which is a good way to start. With auto mode on they carry on alone, and anything that genuinely needs you lands on the ASK ME board. Per agent token budgets and a circuit breaker catch runaway agents either way."
+  - q: "How do I review what an agent changed?"
+    a: "Open the IDE on the agent you are looking at. You can browse and edit files in its workspace and see its uncommitted changes as a diff before you accept anything."
+  - q: "Does Munder Difflin keep working after I walk away?"
+    a: "Yes, as long as the machine stays on. The Triggers tab holds schedules that start work on an interval or on chosen weekdays, and agents keep working through their queue while you are away. Hosted sandboxes that keep going with the lid closed are not available yet."
+  - q: "Is Munder Difflin free?"
+    a: "Yes. The classic office is free and MIT licensed, with unlimited local agents. Pro and Teams are optional paid plans, each with a 14 day trial."
 ---
 
-<div class="callout tldr"><span class="ic">TL;DR</span><p><strong>You can go from zero to a running AI office in one hour.</strong> Minute 0: install. Minute 5: onboarding — it opens on the honest pitch, <strong>a clone of you, working 24/7</strong>, and validates your setup at step one. Minute 10: your <strong>first brief to Michael</strong>. Minute 20: watch avatars work the floor and open a real desk terminal. Minute 40: your <strong>first approval</strong> and a side-by-side diff in the built-in <strong>Monaco IDE</strong>. Minute 60: set a <strong>schedule</strong> and walk away — the office keeps working.</p></div>
+<div class="callout tldr"><span class="ic">TL;DR</span><p><strong>Zero to a working AI office in an
+hour.</strong> Minute 0: download. Minute 5: a short setup, including your clone's engine. Minute 15: your
+<strong>first job for Michael</strong>. Minute 25: watch the floor and open a real terminal. Minute 40:
+answer an <strong>ASK ME</strong> card and read a <strong>diff</strong>. Minute 50: give an agent a
+<strong>skill</strong>. Minute 60: leave a <strong>schedule</strong> running and walk away.</p></div>
 
 <video controls preload="none" playsinline poster="/media/demo/intro-poster.jpg" style="width:100%; border-radius:12px; margin:12px 0 24px;">
   <source src="/media/demo/intro.mp4" type="video/mp4" />
 </video>
 
-Most tools ask you to learn them before they do anything. Munder Difflin is the other kind: within an hour you've briefed an orchestrator, watched agents work, approved a real change, and left the office running without you. Here's that hour, minute by minute — current as of v0.4.4.
+Most tools want you to study them before they do anything useful. This one should be doing real work inside an
+hour: you brief an orchestrator, watch agents work, check a real change, and leave the office running without you.
+Here is that hour, minute by minute, current as of Munder Difflin 0.5.2.
 
-{% youtube "", "Your first hour with Munder Difflin — full walkthrough" %}
+## Minute 0: Download and install
 
-## Minute 0 — Install
+Grab the build for your system from [munderdiffl.in](https://munderdiffl.in/) or the
+[latest release](https://github.com/chaitanyagiri/munder-difflin/releases/latest):
 
-Two paths: grab a signed build (macOS, Windows, Linux) from the [releases page](https://github.com/chaitanyagiri/munder-difflin/releases/latest), or clone and run from source with `npm install && npm run dev`. You'll want at least one supported agent CLI on your `PATH` — the engine card now honestly names all ten: Claude Code, Antigravity, Codex, Grok, Kimi, Qwen, OpenCode, Crush, pi, and GitHub Copilot CLI.
+- **macOS:** one universal `.dmg` for Apple Silicon and Intel, signed and notarized by Apple.
+- **Windows 10 and 11:** a setup installer, or a portable `.exe` if you would rather not install anything.
+- **Linux:** an `.AppImage`.
 
-Missing something? You no longer have to find out the hard way. **Settings → Prerequisites** shows live status for git, Node, uv, MemPalace and every engine — real paths, platform-correct install commands, and a button that simply asks Michael to fill the gaps for you. The [install and usage guide](/blog/how-to-install-and-use-munder-difflin/) covers the deeper details. Budget five minutes.
+Each release also carries a `SHA256SUMS.txt`, so you can check the file you downloaded is the real one.
 
-{% img "note-1", "Prerequisites, before they become surprises: live status for every tool, and a button that hands the gaps to Michael." %}
+You need one terminal coding CLI installed and signed in. Twelve are supported: Claude Code, Codex, Gemini CLI,
+Antigravity, Grok, Kimi Code, Qwen, OpenCode, Crush, Pi, Copilot and Cursor. If you do not pay for any AI
+subscription, Antigravity is free. The [install guide](/blog/how-to-install-and-use-munder-difflin/) has the exact
+commands for every one of them.
 
-## Minute 5 — Onboarding: meet your clone
+## Minute 5: Setup
 
-First launch opens on the pitch the whole product keeps: **a clone of you, working 24/7.** The wizard's few questions are the actual shape of the product:
+First launch walks you through a short setup. It starts by asking whether you are technical, which only changes how
+much jargon the app shows you. Then four steps:
 
-- **Your clone's engine** — Michael runs on a pluggable engine; pick from the ten, change it later.
-- **Harness home** — the folder where the hive lives: per-agent memory, mailboxes, the blackboard, the event log. Plain files in a local git repo. The wizard validates this at step one — an empty or impossible folder fails immediately, not after step four.
-- **Registered repos** — the codebases your agents will work on.
-- **Auto-mode** — whether agents proceed without per-tool prompts (the approval gate still catches critical items).
+- **A home folder** for the app's own files: settings, agent memory and mailboxes. Use a new, empty folder.
+- **Your clone.** Name it and pick the engine that powers it. Give it the most capable model you have, because it
+  does the thinking and the delegating.
+- **Your projects.** The folders agents may work in. A project is just a folder.
+- **Permissions.** Whether agents act on their own or ask first. Start with ask first. You can change it any time.
 
-Finish the wizard and you land on the floor: a pixel-art office, empty except for Michael, who seats himself in his office automatically — with a **BOSS** tag on his card, because he's the boss of the agents while you stay the boss of him. Everything the hive needs starts with him: as of v0.4.4 a brand-new install boots its message router, hook server and mission scheduler on the very first run.
+Every install starts in the classic office, the free version, with the floor you are about to meet.
 
-## Minute 10 — Your first brief to Michael
+{% img "note-1", "Prerequisites in Settings shows the live status of every tool an engine needs, before it becomes a surprise." %}
 
-You don't manage the workers. You talk to your clone, and he runs the floor. Click into Michael's terminal and type a brief the way you'd brief a colleague: what you want, which repo, what "done" looks like. Prefer talking? His voice mode opens with a live snapshot of the floor and can run nearly the whole app.
+## Minute 15: Your first job for Michael
 
-Michael adjudicates. He creates tasks on the kanban, assigns them, and routes messages between agent inboxes. Workers you hire via **Add agent** each get a real CLI process in its own pseudo-terminal and, with the git-isolation toggle, their own worktree — so nobody collides on branches. How he decides what to route, resolve, or escalate is its own post: [how the orchestrator works](/blog/how-the-god-orchestrator-works/).
+You do not manage the workers. You talk to your clone, and he runs the floor. Click into Michael's terminal and
+describe the job the way you would brief a capable new hire: the outcome, the folder, and what done looks like.
+Prefer talking? He has a voice mode.
 
-A good first brief is small and self-contained: "read this repo and write a REPORT.md summarizing the architecture" beats "refactor everything" for hour one.
+A good first job is small and self contained. "Read this repo and write REPORT.md explaining how it fits together"
+beats "refactor everything" for hour one.
 
-## Minute 20 — Watch the floor, then open a desk
+Michael turns the job into tasks on the kanban, hires a worker if he needs one, and routes messages between their
+mailboxes. Each worker is a real CLI process in its own terminal and, with git isolation on, its own worktree. How he
+decides what to handle and what to send your way is its own post: [how Michael routes work](/blog/how-the-god-orchestrator-works/).
 
-Now the part that makes the product legible: the floor is not a decoration, it's the state of the system. Avatars walk to stations as they work. When the hive routes a message, an envelope flies from sender to recipient; escalations fly to the door. The cast is an affectionate parody of The Office, and every movement maps to a real event.
+## Minute 25: Watch the floor, then open a desk
 
-{% img "floor-view", "The floor mid-task: every movement maps to a real event." %}
+The floor is not decoration. It is the state of the system. Characters walk to their desks as they work, and envelopes
+fly between them when they message each other. The cast is an affectionate parody of The Office, and the whole floor is
+a simulation that uses no tokens.
 
-Click any agent and you get their desk: the live terminal (you can type back into it), a sandboxed file browser, and a git tab with status, log, and commit graph. Go fullscreen and the roster cards show each agent's model, project, and a live context gauge — the fuel dial for every worker at a glance. This is the moment the abstraction clicks: that avatar is a real CLI process, and you're reading its actual stdout.
+{% img "floor-view", "The floor mid task: every movement maps to a real event." %}
 
-{% img "note-2", "Every desk is real: a live terminal, a file browser, a git tab — and a context gauge telling you how much runway the agent has left." %}
+Click any agent to open its terminal. You can read the live output and type straight back into it. Want to work with
+one agent without the office around it? Focus mode gives you the terminal full width, and Esc brings the floor back.
+This is the moment it clicks: that character is a real CLI process, and you are reading its actual output.
 
-## Minute 40 — Your first approval, and the diff
+{% img "note-2", "Every desk is real: a live terminal, plus a context gauge showing how much runway the agent has left." %}
 
-Sometime in the first hour, something lands in the approvals queue — a spend threshold, a destructive operation, a scope change. This is by design: Michael resolves routine requests himself and escalates only critical items, so the queue stays short and every item in it deserves your attention. (The philosophy behind that gate: [approving AI agents without babysitting them](/blog/human-in-the-loop-approving-ai-agents/).)
+## Minute 40: Answer an ASK ME card, then read the diff
 
-Before you click approve, look at the work. Hit the title-bar **IDE** button and the built-in Monaco editor — the VS Code editor engine, fully self-hosted — opens over the floor. The git CHANGES rail lists what changed; click a file for a read-only side-by-side diff against HEAD. Images preview right in the IDE now, so a screenshot or SVG an agent produced is one click to inspect. Read the diff, approve the item, watch the envelope fly.
+At some point in the first hour an agent will need you. It might be a question only you can answer, or a step only you
+can take. It shows up on the **ASK ME** board instead of hiding in a scrollback, formatted so you can read it at a
+glance. Michael settles routine questions himself, so whatever reaches you deserves your attention.
 
-## Minute 50 — Give an agent a skill
+Before you say yes to a change, look at it. Open the **IDE** on the agent's workspace to browse its files and see its
+uncommitted changes as a diff. Read it, answer the card, and watch the work carry on. The thinking behind that gate is in
+[approving AI agents without babysitting them](/blog/human-in-the-loop-approving-ai-agents/).
 
-New in v0.4.4 and worth five minutes of your first hour: **Skills.** A browsable catalog of hundreds of skills — search, category and publisher filters — installable across Claude Code, OpenCode and Codex with scope precedence handled for you. Give your reviewer a review checklist, your writer a style guide, your researcher a source-citing discipline. It's the difference between hiring generalists and hiring people who've read the manual. (Background: [MCP and skills in a hive](/blog/mcp-and-skills-in-a-hive/).)
+## Minute 50: Give an agent a skill
 
-## Minute 60 — Leave it running
+The **skills** tab is a catalog of skills you can install for your agents. Give your reviewer a review checklist, your
+writer a style guide, and your researcher the habit of citing sources. It is the difference between hiring generalists
+and hiring people who actually read the manual. More in [MCP and skills in a hive](/blog/mcp-and-skills-in-a-hive/).
 
-The last move of the hour is the one that changes your relationship with the tool: schedule something. The Command Center's **Triggers** tab takes a label, an interval, a target agent, and a mission body — "every morning, triage new GitHub issues," say — and a heartbeat re-engages the floor if it goes quiet. Last-fired and next-fired times are right there in the tab.
+## Minute 60: Leave it running
 
-Close the laptop. It's local-first, so tomorrow the office is exactly where you left it — probably with mail in your queue. And when the next release ships, the app tells you itself: the update toast says what's actually inside before you restart into it. For patterns on what's worth automating, see [scheduling autonomous agent missions](/blog/scheduling-autonomous-agent-missions/).
+The last move of the hour is the one that changes how you use the tool: schedule something. Open the **Triggers** tab and
+create a schedule with a label, who it goes to, and the prompt, which is sent word for word on every run. It can repeat on
+an interval or on chosen weekdays at a set time. "Every weekday at 9, triage new GitHub issues and summarise them for me" is
+a good first one.
+
+Leave the machine on and walk away. The agents keep working, and when a new version ships the app updates itself. Hosted
+sandboxes that keep working with the lid closed are not available yet, so for now the office runs wherever you run it. For
+ideas on what is worth automating, read [scheduling autonomous agent missions](/blog/scheduling-autonomous-agent-missions/).
+
+## Want the office in one window?
+
+Everything above is the free classic office. If you would rather work in a single window, **Pro** puts the orchestrator,
+agents, tasks, inbox, automations and memory in one workspace and adds **Stapler**, a small floating window that sends a
+screenshot, a recorded message or a meeting transcript to your orchestrator with one line from you. **Teams** lets your
+clone work with your teammates' clones. Both come with a 14 day trial, and the [pricing page](https://munderdiffl.in/#pricing)
+has the details.
 
 ## The hour, in one line
 
-Install, meet your clone, brief him once, watch the floor, read one diff, install one skill, set one schedule — and you've gone from "a CLI in a terminal" to "an office that works while you don't."
+Install, set up your clone, give him one job, watch the floor, answer one card, read one diff, install one skill, set one
+schedule. That is the whole distance from "a CLI in a terminal" to "an office that works while you do not".
 
-[Download Munder Difflin](https://github.com/chaitanyagiri/munder-difflin/releases/latest) — free, MIT-licensed, local-first — and if the first hour earns it, [a GitHub star](https://github.com/chaitanyagiri/munder-difflin) helps more people find it.
+[Download Munder Difflin](https://munderdiffl.in/), free and MIT licensed. If the first hour earns it,
+[a GitHub star](https://github.com/chaitanyagiri/munder-difflin) helps other people find it.

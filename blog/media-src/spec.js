@@ -25,6 +25,11 @@ const SPEC = {
   "claude-squad-vs-munder-difflin": { a: "versus", blue: "claude squad", blue2: "munder difflin", orange: "which should you use?" },
   "cline-vs-munder-difflin": { a: "versus", blue: "in-editor agent", blue2: "local hive", orange: "cline vs munder difflin" },
   "command-center-guide": { a: "spotlight", blue: "kanban · fleet · budgets", orange: "one screen for the whole floor" },
+  "how-to-add-an-mcp-server-to-claude-code": { a: "wire", blue: "claude mcp add", orange: "one command, three scopes" },
+  "codex-cli-vs-claude-code": { a: "versus", blue: "codex cli", blue2: "claude code", orange: "same job, two dials" },
+  "how-much-does-claude-code-cost": { a: "ledger", blue: "pro · max · api", orange: "what the bill really says" },
+  "how-to-use-claude-code-plan-mode": { a: "guard", amber: "risky edits", blue: "permission mode: plan", orange: "read first, edit after yes" },
+  "what-is-an-mcp-server": { a: "routing", amber: "requests", blue: "mcp", orange: "one plug, many tools" },
   "compressing-agent-memory": { a: "memory", blue: "compress, keep the original", orange: "smaller memory, no loss" },
   "conductor-claude-code-alternative": { a: "versus", blue: "conductor", blue2: "munder difflin", orange: "a conductor alternative" },
   "context-engineering-for-ai-agents": { a: "ledger", blue: "the context window is a budget", orange: "spend it deliberately" },
@@ -134,4 +139,5 @@ const SPEC = {
   "turn-feedback-into-a-backlog-with-agents": { a: "routing", blue: "comments in → cards out", orange: "feedback becomes work", amber: "516 incoming" },
   "we-opened-a-discord": { a: "talk", blue: "come say hi", blue2: "employee of the month", orange: "the office got a lobby" },
   "launching-munder-difflin-v0-4-6": { a: "ship", blue: "v0.4.6 · three languages", orange: "it speaks your language now" },
+  "launching-munder-difflin-v0-5-2": { a: "ship", blue: "0.5.2 · pro workspace · stapler", orange: "one download, three plans" },
 };

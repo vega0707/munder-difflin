@@ -48,7 +48,7 @@ spawns each agent with `--permission-mode bypassPermissions`. The onboarding flo
 
 That honesty is the right framing. Bypass mode isn't reckless — it's the *correct* default for an
 unattended control room. But it removes the last interactive gate, so the safety has to live somewhere
-else. The rest of this post is "somewhere else."
+else. The rest of this post is "somewhere else." One side effect worth knowing: a bypass session also skips plan mode's edit block, as [how to use Claude Code plan mode](/blog/how-to-use-claude-code-plan-mode/) explains.
 
 {% img "note-1" %}
 

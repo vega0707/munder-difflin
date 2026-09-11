@@ -5,6 +5,8 @@ date: 2026-05-25
 category: guides
 categoryLabel: Guides
 type: Technical
+pinned: true
+pinOrder: 4
 primaryKeyword: "how to manage multiple claude code sessions"
 secondaryKeywords: ["manage claude code sessions", "claude code workflow", "multiple terminals"]
 tags: ["Guides", "Workflow", "Claude Code", "Multi-Agent"]

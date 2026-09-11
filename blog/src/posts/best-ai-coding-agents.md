@@ -112,7 +112,7 @@ enough. If that's your need specifically with Claude Code, the
 
 For a structured rubric across all of these, see [how to choose a multi-agent tool](/blog/how-to-choose-a-multi-agent-tool/);
 for two head-to-heads, [Cline vs](/blog/cline-vs-munder-difflin/) and
-[Claude Squad vs Munder Difflin](/blog/claude-squad-vs-munder-difflin/).
+[Claude Squad vs Munder Difflin](/blog/claude-squad-vs-munder-difflin/). Choosing between two terminal agents? [Codex CLI vs Claude Code](/blog/codex-cli-vs-claude-code/) compares them head to head.
 
 ## The bottom line
 

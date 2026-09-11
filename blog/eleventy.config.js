@@ -54,6 +54,25 @@ export default function (eleventyConfig) {
       .sort((a, b) => b.date - a.date)
   );
 
+  // Pinned pillar guides (`pinned: true`), in `pinOrder`. They sit above the
+  // newest post on the index and first on their topic page, so a fast publishing
+  // pace never pushes the reference guides off the top.
+  const pinRank = (p) => (p.data.pinned ? (p.data.pinOrder ?? 99) : 1e9);
+  eleventyConfig.addCollection("pinned", (api) =>
+    api
+      .getFilteredByGlob("src/posts/*.md")
+      .filter((p) => !p.data.draft && p.data.pinned)
+      .sort((a, b) => pinRank(a) - pinRank(b) || b.date - a.date)
+  );
+
+  // Everything else, newest first: the index features the first of these.
+  eleventyConfig.addCollection("unpinned", (api) =>
+    api
+      .getFilteredByGlob("src/posts/*.md")
+      .filter((p) => !p.data.draft && !p.data.pinned)
+      .sort((a, b) => b.date - a.date)
+  );
+
   // Topic clusters (categories) — derived from each post's `category` field.
   eleventyConfig.addCollection("categories", (api) => {
     const map = {};
@@ -67,7 +86,7 @@ export default function (eleventyConfig) {
       .map(([name, posts]) => ({
         name,
         slug: slugify(name),
-        posts: posts.sort((a, b) => b.date - a.date),
+        posts: posts.sort((a, b) => pinRank(a) - pinRank(b) || b.date - a.date),
       }))
       .sort((a, b) => b.posts.length - a.posts.length);
   });

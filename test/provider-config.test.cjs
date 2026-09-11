@@ -14,7 +14,8 @@ const {
   decodeProviderModel,
   encodeProviderModel,
   modelProvidersForAgent,
-  modelsForProvider
+  modelsForProvider,
+  onboardingEngineChoices
 } = loadTs('src/renderer/src/store/config.ts');
 
 const autoConfig = { defaultCommand: 'claude', autoMode: true };
@@ -106,7 +107,7 @@ test('model picker options stay provider-specific', () => {
   );
   assert.deepEqual(
     modelsForProvider('codex').map((model) => model.id),
-    [undefined, 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']
+    [undefined, 'gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']
   );
   assert.deepEqual(
     modelsForProvider('grok').map((model) => model.id),
@@ -139,6 +140,22 @@ test('Command Center model choices round-trip provider and model', () => {
     { provider: 'kimi', model: undefined }
   );
   assert.equal(decodeProviderModel('unknown:model'), null);
+});
+
+test('onboarding lists every engine — orchestrator-capable first, workers-only after, custom never', () => {
+  // Issue #355: hiding Copilot from the onboarding engine step read as "not
+  // supported at all". The step now SHOWS inbox-less engines as disabled
+  // workers-only rows instead of omitting them, so the split must be exact:
+  // selectable = the god-eligible set, workersOnly = everything a worker can
+  // run but Michael cannot (custom stays hidden — it is not a preset engine).
+  const { eligible, workersOnly } = onboardingEngineChoices();
+  assert.deepEqual(
+    eligible.map((preset) => preset.id),
+    ['builtin', 'claude', 'codex', 'grok', 'gemini', 'antigravity', 'qwen', 'opencode', 'crush', 'pi', 'cursor'],
+    'selectable rows are the god-eligible engines in preset order — builtin leads, it is the default orchestrator'
+  );
+  assert.deepEqual(workersOnly.map((preset) => preset.id), ['kimi', 'copilot']);
+  assert.ok(!eligible.concat(workersOnly).some((preset) => preset.id === 'custom'));
 });
 
 test('God only sees providers that can drain hive inbox messages', () => {
