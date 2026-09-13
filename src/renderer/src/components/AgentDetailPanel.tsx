@@ -8,6 +8,7 @@ import { PtyTerminalView } from './PtyTerminalView';
 import { terminalInstanceKey } from './terminalRecovery';
 import { MessageQueueComposer } from './MessageQueueComposer';
 import { ChatEnginePanel } from './ChatEnginePanel';
+import { isInProcessChatEngine } from '@shared/agentProvider';
 import { CommandCenterPanel } from './CommandCenterPanel';
 import { disposeTerminal } from './terminalPool';
 import { SidebarTabs } from './SidebarTabs';
@@ -85,6 +86,10 @@ export function AgentDetailPanel({ agent }: AgentDetailPanelProps) {
   const sidebarTab = useStore(s => s.sidebarTab);
   const setSidebarTab = useStore(s => s.setSidebarTab);
   const isReal = !!agent.ptyId;
+  /** An in-process seat (built-in / 程小帮) has no PTY to close, so the kill
+   *  button below never rendered for it — which left those seats removable only
+   *  by editing files. They still need a way off the floor. */
+  const isInProcess = !agent.ptyId && isInProcessChatEngine(agent.provider);
   // While this agent is shown in the fullscreen overlay, the fullscreen view
   // owns the pty (it sizes it to fill the screen). Keeping the embedded terminal
   // mounted too means two xterms fight over the pty's cols/rows — which corrupts
@@ -122,6 +127,13 @@ export function AgentDetailPanel({ agent }: AgentDetailPanelProps) {
     if (!confirm(t('agentDetail.killConfirm', { name: agent.name }))) return;
     await window.cth.killPty(agent.ptyId);
     disposeTerminal(agent.ptyId);
+    archiveAgent(agent.id);
+  };
+
+  /** Same archive, said plainly. There is no process to end here, so a "close"
+   *  confirm would describe something that does not happen. */
+  const onRemove = () => {
+    if (!confirm(t('agentDetail.removeConfirm', { name: agent.name }))) return;
     archiveAgent(agent.id);
   };
 
@@ -221,6 +233,16 @@ export function AgentDetailPanel({ agent }: AgentDetailPanelProps) {
             <Icon name="x" />
           </PixelButton>
         )}
+        {isInProcess && (
+          <PixelButton
+            variant="destructive"
+            size="sm"
+            onClick={onRemove}
+            title={t('agentDetail.remove')}
+          >
+            <Icon name="x" />
+          </PixelButton>
+        )}
       </div>
 
       {openTerminalError && (
@@ -272,7 +294,7 @@ export function AgentDetailPanel({ agent }: AgentDetailPanelProps) {
               <MessageQueueComposer agent={agent} />
             </div>
             )
-          ) : agent.provider === 'builtin' ? (
+          ) : isInProcessChatEngine(agent.provider) ? (
             // The seat has no terminal by design — give it the surface it does
             // have, instead of an explanation of why the terminal is missing.
             <ChatEnginePanel agent={agent} />

@@ -151,8 +151,8 @@ test('onboarding lists every engine — orchestrator-capable first, workers-only
   const { eligible, workersOnly } = onboardingEngineChoices();
   assert.deepEqual(
     eligible.map((preset) => preset.id),
-    ['builtin', 'claude', 'codex', 'grok', 'gemini', 'antigravity', 'qwen', 'opencode', 'crush', 'pi', 'cursor'],
-    'selectable rows are the god-eligible engines in preset order — builtin leads, it is the default orchestrator'
+    ['builtin', 'chengxiaobang', 'claude', 'codex', 'grok', 'gemini', 'antigravity', 'qwen', 'opencode', 'crush', 'pi', 'cursor'],
+    'selectable rows are the god-eligible engines in preset order — the two no-install engines lead'
   );
   assert.deepEqual(workersOnly.map((preset) => preset.id), ['kimi', 'copilot']);
   assert.ok(!eligible.concat(workersOnly).some((preset) => preset.id === 'custom'));
@@ -164,10 +164,10 @@ test('God only sees providers that can drain hive inbox messages', () => {
   // Cursor is interactive (no -p) so it IS god-eligible.
   assert.deepEqual(
     modelProvidersForAgent(true).map((preset) => preset.id),
-    ['claude', 'codex', 'grok', 'gemini', 'antigravity', 'qwen', 'opencode', 'crush', 'pi', 'cursor']
+    ['chengxiaobang', 'claude', 'codex', 'grok', 'gemini', 'antigravity', 'qwen', 'opencode', 'crush', 'pi', 'cursor']
   );
   assert.deepEqual(
     modelProvidersForAgent(false).map((preset) => preset.id),
-    ['claude', 'codex', 'grok', 'kimi', 'gemini', 'antigravity', 'qwen', 'opencode', 'crush', 'pi', 'copilot', 'cursor']
+    ['chengxiaobang', 'claude', 'codex', 'grok', 'kimi', 'gemini', 'antigravity', 'qwen', 'opencode', 'crush', 'pi', 'copilot', 'cursor']
   );
 });

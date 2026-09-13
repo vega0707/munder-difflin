@@ -147,6 +147,10 @@ const CONTEXT_COMMANDS: Record<AgentProvider, ProviderContextCommands> = {
   // Product-owned inbox runner — no TUI, so no slash commands to type.
   builtin: NO_CONTEXT_COMMANDS,
 
+  // 程小帮 runs in-process on the same footing as builtin: there is no REPL and no
+  // slash parser, so there is nothing to type a compaction command into.
+  chengxiaobang: NO_CONTEXT_COMMANDS,
+
   // An arbitrary user binary. We cannot know its command surface, and guessing
   // means typing slashes into someone's unknown REPL.
   custom: NO_CONTEXT_COMMANDS

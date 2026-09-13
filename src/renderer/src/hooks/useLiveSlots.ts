@@ -98,7 +98,9 @@ async function spawnOne(agent: Agent, config: HarnessConfig): Promise<'live' | '
     return 'fail';
   }
   if (res.builtin) {
-    useStore.getState().updateAgent(agent.id, { provider: 'builtin', status: 'idle', action: 'idle' });
+    // The main process served this in-process; keep the engine the operator
+    // picked rather than flattening every such seat to `builtin`.
+    useStore.getState().updateAgent(agent.id, { provider, status: 'idle', action: 'idle' });
     return 'fail';
   }
   useStore.getState().updateAgent(agent.id, {

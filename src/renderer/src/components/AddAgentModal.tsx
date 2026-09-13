@@ -28,6 +28,7 @@ import {
   modelsForProvider,
   providerPreset,
   isClaudeProvider,
+  isInProcessChatEngine,
   DEFAULT_AGENT_PROVIDER,
   resolveAgentProvider
 } from '@/store/config';
@@ -233,8 +234,10 @@ export function AddAgentModal({ onClose, config, onConfigChange }: AddAgentModal
       setCommand(command.trim() || config.defaultCommand || '');
       return;
     }
-    if (id === 'builtin') {
-      setCommand('builtin');
+    if (isInProcessChatEngine(id)) {
+      // No CLI to invoke: the "command" is the engine's own name, and the seat
+      // runs in the main process.
+      setCommand(id);
       return;
     }
     setCommand(buildSpawnCommand(config, nextModel, id));
@@ -400,7 +403,7 @@ export function AddAgentModal({ onClose, config, onConfigChange }: AddAgentModal
     // the offending section as we surface the error — the field is never hidden.
     if (!name.trim()) { setError(tr('addAgent.errName')); setSection('identity'); return; }
     if (!cwd) { setError(tr('addAgent.errFolder')); setSection('workspace'); return; }
-    if (provider !== 'builtin' && !command.trim()) { setError(tr('addAgent.errCommand')); setSection('engine'); return; }
+    if (!isInProcessChatEngine(provider) && !command.trim()) { setError(tr('addAgent.errCommand')); setSection('engine'); return; }
 
     setBusy(true);
     const projectId = useStore.getState().activeProjectId ?? 'default';
@@ -898,6 +901,8 @@ export function AddAgentModal({ onClose, config, onConfigChange }: AddAgentModal
                                     ? tr('addAgent.providerCodex')
                                   : p.id === 'builtin'
                                     ? tr('addAgent.providerBuiltin')
+                                  : p.id === 'chengxiaobang'
+                                    ? tr('addAgent.providerChengxiaobang')
                                     : p.id === 'custom'
                                       ? tr('addAgent.providerCustom')
                                       : p.label
@@ -1023,7 +1028,7 @@ export function AddAgentModal({ onClose, config, onConfigChange }: AddAgentModal
                       </div>
                     )}
 
-                    {provider !== 'builtin' && (
+                    {!isInProcessChatEngine(provider) && (
                     <Row label={config.autoMode && preset.autoFlag ? tr('addAgent.commandAuto') : tr('addAgent.command')}>
                       <input
                         value={command}

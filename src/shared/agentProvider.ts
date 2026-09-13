@@ -35,10 +35,20 @@ export type AgentProvider =
   | 'copilot'
   | 'cursor'
   | 'builtin'
+  | 'chengxiaobang'
   | 'custom';
 
 /** Default engine when the user has not picked a CLI. No install, no PTY. */
 export const DEFAULT_AGENT_PROVIDER: AgentProvider = 'builtin';
+
+/** Engines that run INSIDE this app — no child process, no PTY, nothing to
+ *  install. A seat on one of these is served by BuiltinAgentHost and gets a chat
+ *  panel where a CLI seat gets a terminal. */
+export const IN_PROCESS_CHAT_PROVIDERS: readonly AgentProvider[] = ['builtin', 'chengxiaobang'];
+
+export function isInProcessChatEngine(provider: AgentProvider | undefined): boolean {
+  return IN_PROCESS_CHAT_PROVIDERS.includes(provider as AgentProvider);
+}
 
 /** Structured descriptor for how a NON-hiveAware provider gets hive lifecycle
  *  events (live status + Stop→inbox-drain + cost), introduced alongside the legacy
@@ -183,6 +193,24 @@ export const AGENT_PROVIDER_PRESETS: AgentProviderPreset[] = [
     commandGroups: [],
     autoModeFlag: '',
     supportsModel: false,
+    autoFlag: '',
+    hiveAware: false,
+    canReceiveInbox: true
+  },
+  {
+    // 程小帮 as a selectable engine. It runs in-process exactly like `builtin`
+    // (no CLI, no PTY) but it DOES have a model list, and that list is the
+    // operator's actual 程小帮 subscription rather than something compiled in —
+    // probed at runtime (src/main/chengxiaobangModels.ts). Choosing it is a
+    // statement about which channel you want to spend, so it sits beside
+    // Built-in as the second no-install option.
+    id: 'chengxiaobang',
+    label: '程小帮',
+    defaultCommand: 'chengxiaobang',
+    commandGroups: [],
+    autoModeFlag: '',
+    supportsModel: true,
+    recommendedOrchestratorModel: 'auto',
     autoFlag: '',
     hiveAware: false,
     canReceiveInbox: true
@@ -611,6 +639,7 @@ export function isAgentProvider(value: unknown): value is AgentProvider {
     value === 'copilot' ||
     value === 'cursor' ||
     value === 'builtin' ||
+    value === 'chengxiaobang' ||
     value === 'custom'
   );
 }
@@ -671,6 +700,7 @@ export function inferAgentProvider(command: string | undefined, explicit?: unkno
   if (bin === 'cursor-agent') return 'cursor';
   if (bin === 'agent') return 'cursor';
   if (bin === 'builtin') return 'builtin';
+  if (bin === 'chengxiaobang') return 'chengxiaobang';
   if (bin === 'claude' || !bin) return 'claude';
   return 'custom';
 }
@@ -693,9 +723,9 @@ export function defaultCommandForProvider(provider: AgentProvider, fallback = ''
   return providerPreset(provider).defaultCommand || fallback;
 }
 
-/** Built-in seats have no child process; skip PTY spawn and the 5-agent cap. */
+/** In-process seats have no child process; skip PTY spawn and the 5-agent cap. */
 export function providerNeedsPty(provider: AgentProvider | undefined): boolean {
-  return (provider ?? 'claude') !== 'builtin';
+  return !isInProcessChatEngine(provider ?? 'claude');
 }
 
 /** Returns the preset's auto-mode CLI flag for the given provider. Empty string = no flag. */

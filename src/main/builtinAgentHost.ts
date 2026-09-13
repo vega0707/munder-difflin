@@ -1,4 +1,5 @@
 import { draftBuiltinReply } from '../shared/builtinAgent';
+import { isInProcessChatEngine } from '../shared/agentProvider';
 import { AgentRuntime, type AgentRunEvent, type AgentRunResult, type AgentToolTraceEntry, type LlmClient } from './agentRuntime';
 import { createAgentTools } from './agentTools';
 import { createAgentLlm } from './agentLlm';
@@ -271,7 +272,9 @@ export class BuiltinAgentHost {
         let reg: ReturnType<HiveManager['registry']>;
         try { reg = hive.registry(); } catch { continue; }
         for (const [id, agent] of Object.entries(reg.agents)) {
-          if (agent.provider !== 'builtin' || agent.archived) continue;
+          // Every in-process seat, not just `builtin`: 程小帮 runs on the same
+          // runtime and would otherwise be skipped here and never answer at all.
+          if (!isInProcessChatEngine(agent.provider) || agent.archived) continue;
           const occ = await this.opts.occupancy(hive.projectId, id);
           if (occ === 'remote') continue;
           const mail = hive.inbox(id);

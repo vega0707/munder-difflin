@@ -7,6 +7,7 @@ import {
   autoModeFlagForProvider,
   defaultCommandForProvider,
   inferAgentProvider,
+  isInProcessChatEngine,
   providerPreset,
   resolveAgentProvider,
   type AgentProvider
@@ -824,7 +825,7 @@ export function modelForRole(
     // GOD engine is selectable: an explicit godModel wins, else the chosen
     // provider's recommended orchestrator model, else the legacy Opus default.
     const provider = resolveAgentProvider(config?.godProvider);
-    if (provider === 'builtin') return config?.godModel;
+    if (isInProcessChatEngine(provider)) return config?.godModel;
     const preset = providerPreset(provider);
     return config?.godModel ?? preset.recommendedOrchestratorModel ?? MODEL_GOD;
   }

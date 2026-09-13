@@ -16,7 +16,7 @@ function tempWorkspace() {
 }
 
 /** A fake HiveManager covering just what the host touches. */
-function fakeHive({ cwd, inbox = [], isGod = false }) {
+function fakeHive({ cwd, inbox = [], isGod = false, provider = 'builtin' }) {
   const hivesRoot = tempWorkspace();
   const sent = [];
   const cards = [];
@@ -29,7 +29,7 @@ function fakeHive({ cwd, inbox = [], isGod = false }) {
     receive: (msg) => { pending = [...pending, msg]; },
     registry: () => ({
       agents: {
-        worker: { id: 'worker', name: 'Worker', provider: 'builtin', cwd, archived: false, isGod }
+        worker: { id: 'worker', name: 'Worker', provider, cwd, archived: false, isGod }
       }
     }),
     // Task ledger, so the delegation tools have somewhere to write.
@@ -325,6 +325,16 @@ test('the kept transcript is bounded, so a long-lived process cannot grow withou
   assert.equal(history.at(-2).content, 'msg 39');
 });
 
+
+test('a 程小帮 seat is served by the same host, not skipped as a non-builtin provider', async () => {
+  const hive = fakeHive({ cwd: tempWorkspace(), inbox: MAIL, provider: 'chengxiaobang' });
+  const client = scriptedClient([{ kind: 'text', text: 'answered' }]);
+  const { host } = hostFor(hive, { llmConfig: () => CHANNEL, createClient: () => client });
+
+  assert.equal(await host.tick(), 1);
+  assert.equal(hive.sent.length, 1);
+  assert.equal(hive.remaining.length, 0);
+});
 
 // ──────────────────────────────── other guards ────────────────────────────────
 

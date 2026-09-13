@@ -11,7 +11,7 @@
  *
  * Pure and electron-free on purpose so it is testable from node --test.
  */
-import type { AgentProvider } from './agentProvider';
+import { isInProcessChatEngine, type AgentProvider } from './agentProvider';
 import type { ToolStatus } from './toolCatalog';
 
 export type EngineAvailabilityState =
@@ -39,7 +39,7 @@ export function classifyEngineAvailability(
   statuses: readonly ToolStatus[] | undefined,
   provider: AgentProvider
 ): EngineAvailability {
-  if (provider === 'builtin') {
+  if (isInProcessChatEngine(provider)) {
     return { state: 'installed', path: null, installCommand: '' };
   }
   const row = statuses?.find((s) => s.id === `engine:${provider}`);

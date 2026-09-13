@@ -111,7 +111,9 @@ import {
   defaultCommandForProvider,
   inferAgentProvider,
   isClaudeProvider,
+  isInProcessChatEngine,
   nonInteractiveEnvForProvider,
+  providerNeedsPty,
   providerPreset,
   installInfoForProvider,
   resolveAgentProvider,
@@ -2993,12 +2995,12 @@ async function spawnAgentCore(opts: AgentSpawnOptions, owner: Electron.WebConten
   if (seatAgentId && opts.projectId && (await seatBoard.occupancy(opts.projectId, seatAgentId)) === 'remote') {
     return { ok: false, error: 'this seat is claimed on another machine', code: 'SEAT_TAKEN' } as { ok: boolean; error?: string };
   }
-  if (provider === 'builtin') {
+  if (!providerNeedsPty(provider)) {
     if (!opts.noAutoInstall) analytics.track('agent_spawn_attempted', { provider });
     const h = resolveHive(projectRegistry, hive, opts.projectId);
-    if (opts.hive) await h.ensureAgent({ ...opts.hive, provider: 'builtin' });
+    if (opts.hive) await h.ensureAgent({ ...opts.hive, provider });
     if (seatAgentId && opts.projectId) {
-      const claimed = await seatBoard.claim(opts.projectId, seatAgentId, { provider: 'builtin' });
+      const claimed = await seatBoard.claim(opts.projectId, seatAgentId, { provider });
       if (!claimed.ok) {
         return { ok: false, error: claimed.error, code: claimed.code } as { ok: boolean; error?: string };
       }
@@ -4192,8 +4194,12 @@ ipcMain.handle('seat:takeOver', async (evt, payload: unknown) => {
   }
   const commandLine = pack?.command || defaultCommandForProvider(provider, readConfig().defaultCommand);
   const parts = commandLine.trim().split(/\s+/).filter(Boolean);
-  const exe = provider === 'builtin' ? 'builtin' : (parts[0] || 'claude');
-  const args = provider === 'builtin' ? [] : parts.slice(1);
+  // An in-process seat has no CLI: its identifier is the provider itself, and it
+  // returns before either is used. Kept explicit so nobody reads `parts[0]` as a
+  // binary for something that has none.
+  const needsPty = providerNeedsPty(provider);
+  const exe = needsPty ? (parts[0] || 'claude') : defaultCommandForProvider(provider, 'builtin');
+  const args = needsPty ? parts.slice(1) : [];
   const ptyId = `pty:${projectId}:${agentId}`;
   const owner = BrowserWindow.fromWebContents(evt.sender)?.webContents ?? null;
   const spawned = await spawnAgentCore({

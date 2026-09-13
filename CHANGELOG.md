@@ -26,6 +26,20 @@ All notable changes to this project are documented here. The format is based on
   in a file per floor instead of in code. The rules around it are shared and carry no business
   content, and a floor with no manual is told so explicitly rather than left to imply it has sources
   it does not.
+- **程小帮 is a selectable engine.** It sits beside Built-in as a no-install option: the seat runs
+  in-process, so there is no CLI to install and no PTY, and it gets a chat panel instead of a
+  terminal. Its channel is the one 程小帮 is configured against, and its default model is `auto`,
+  which is what that gateway expects.
+  What it deliberately does NOT do is offer 程小帮's subscription model names. Those were measured
+  and they belong to a different endpoint: on the channel this app actually calls, `auto` and
+  `auto(free)` work while `claude-sonnet-5` and `gpt-5.6-sol-2026-07-09-aws` come back
+  "model is not currently supported". Shipping the subscription list would have been a picker of
+  thirty entries that fail on click. Pointing this engine at 程小帮's own backend instead is a
+  separate piece of work: it needs its own credential, which its local API does not expose.
+- **Seats that run in-process can leave the floor.** The kill button was the only way off a floor and
+  it required a live PTY, so a Built-in or 程小帮 seat had no exit at all — the seat had to be removed
+  by editing files. Such seats now get their own ✕, which archives them without pretending to
+  terminate a process that does not exist. Archived seats stay restorable, as before.
 - **Tasks show their id.** The one thing people actually refer to a card by — `bmt-12` — was not
   displayed anywhere: not on the kanban card, which printed only the title and the assignee, and not
   in the detail view behind it. It now leads the card above the title, and leads the detail view's

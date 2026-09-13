@@ -5,6 +5,7 @@ import {
   providerPreset,
   inferAgentProvider,
   isClaudeProvider,
+  isInProcessChatEngine,
   DEFAULT_AGENT_PROVIDER,
   resolveAgentProvider,
   type AgentProvider,
@@ -24,6 +25,7 @@ export {
   providerPreset,
   inferAgentProvider,
   isClaudeProvider,
+  isInProcessChatEngine,
   DEFAULT_AGENT_PROVIDER,
   resolveAgentProvider,
   type AgentProvider
