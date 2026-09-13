@@ -80,6 +80,15 @@ All notable changes to this project are documented here. The format is based on
   keeps the app's default: blocking a seat on an answer nobody is present to give would just stall the
   floor. Both verified against the running app: a Shell call stopped at the gate, was approved, and the
   run completed; and `undo` on a run that wrote a file really removed it.
+- **An unattended seat asks the god before it asks you.** A run woken by mail has nobody at the keyboard,
+  so it now runs with permission gates ON and hands any gate to the god, who is the human's proxy on the
+  floor: allow once, or deny. No answer within the window denies it — an unattended agent must never be
+  allowed to do something nobody approved — and the god is told it timed out so it can raise the question
+  on the ASK ME board itself. A turn TYPED at a seat keeps its gate for the person who is watching.
+  Two bugs the tests caught, both invisible by reading: a zero-length window never expired because the
+  comparison was `>` rather than `>=`, and that hid behind a cold-start millisecond when the test ran
+  alone; and the god's reply was matched by SENDER id, which is brittle — it is matched by the id of the
+  message we sent now, since a reply quoting it is the answer whatever the sender calls itself.
 - **Tasks show their id.** The one thing people actually refer to a card by — `bmt-12` — was not
   displayed anywhere: not on the kanban card, which printed only the title and the assignee, and not
   in the detail view behind it. It now leads the card above the title, and leads the detail view's

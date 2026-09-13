@@ -631,21 +631,96 @@ test('reverting a seat with no finished changes says so', async () => {
   assert.match((await host.revertSeat('default', 'worker', { direction: 'undo' })).error, /no finished run with file changes/);
 });
 
-test('a typed turn asks for approval mode; a mail run is left on the app default', async () => {
-  // Someone typing is present to answer a gate; a run woken by mail is not, and
-  // blocking it on an answer nobody can give would just stall the floor.
+
+test('a gate on a mail run is handed to the god', async () => {
+  // Nobody is at the keyboard, so the gate climbs the ladder instead of waiting
+  // for a click nobody will make — and it must never quietly allow by default.
+  const hive = fakeHive({ cwd: tempWorkspace(), inbox: MAIL, provider: 'chengxiaobang' });
+  const client = controllableCxb();
+  const { host } = cbHost(hive, client);
+
+  const ticking = host.tick();
+  await client.started;
+
+  const toGod = hive.sent.find(
+    (m) => m.to === 'god' && /permission needed/.test(m.subject ?? '')
+  );
+  assert.ok(toGod, 'the gate went to the god');
+  assert.match(toGod.body, /Shell/);
+  assert.equal(toGod.requires_reply, true);
+
+  client.release();
+  await ticking;
+});
+
+test('a typed turn keeps its gate for the person who is watching', async () => {
   const hive = fakeHive({ cwd: tempWorkspace(), inbox: [], provider: 'chengxiaobang' });
   const client = fakeCxbClient();
   const { host } = cbHost(hive, client);
 
   await host.sendTurn('default', 'worker', 'kettle on');
-  assert.equal(client.calls.runs[0].accessMode, 'approval');
 
-  const mailHive = fakeHive({ cwd: tempWorkspace(), inbox: MAIL, provider: 'chengxiaobang' });
-  const mailClient = fakeCxbClient();
-  const { host: mailHost } = cbHost(mailHive, mailClient);
-  await mailHost.tick();
-  assert.equal(mailClient.calls.runs[0].accessMode, undefined);
+  assert.equal(client.calls.runs[0].accessMode, 'approval', 'gates on, so the panel can show them');
+  assert.equal(
+    hive.sent.filter((m) => m.to === 'god').length,
+    0,
+    'no relay: the person typing is the one who answers'
+  );
+});
+
+test('a gate the god never answers is denied, and the god is told', async () => {
+  const hive = fakeHive({ cwd: tempWorkspace(), inbox: MAIL, provider: 'chengxiaobang' });
+  const client = controllableCxb();
+  // Zero window: the next tick is already past it.
+  const { host } = cbHost(hive, client, { approvalRelayMs: 0 });
+
+  const ticking = host.tick();
+  await client.started;
+  client.release();
+  await ticking;
+
+  // A relay is answered on a LATER pass, which is what a polling host looks like
+  // — and a pass is skipped outright when the previous one is still running. So
+  // nudge until it lands instead of assuming one tick is enough.
+  for (let i = 0; i < 6 && client.calls.approved.length === 0; i += 1) {
+    hive.receive({ id: `kick-${i}`, from: 'michael', to: 'worker', act: 'request', subject: 'x', body: 'y' });
+    await host.tick();
+  }
+
+  assert.deepEqual(client.calls.approved, [{ toolCallId: 'tc_1', approved: false }]);
+  assert.ok(
+    hive.sent.some((m) => /denied, no answer/.test(m.subject ?? '')),
+    'the god is told it timed out, so it can escalate to the human itself'
+  );
+});
+
+test('the god’s answer is relayed as the decision', async () => {
+  const hive = fakeHive({ cwd: tempWorkspace(), inbox: MAIL, provider: 'chengxiaobang' });
+  const client = controllableCxb();
+  const { host } = cbHost(hive, client, { approvalRelayMs: 60_000 });
+
+  const ticking = host.tick();
+  await client.started;
+  const request = hive.sent.find((m) => m.to === 'god');
+  client.release();
+  await ticking;
+
+  // The god agrees, quoting the request.
+  hive.receive({
+    id: 'god-reply',
+    from: 'michael',
+    to: 'worker',
+    act: 'agree',
+    subject: 'Re: permission needed',
+    body: 'go ahead',
+    in_reply_to: request.id
+  });
+  for (let i = 0; i < 6 && client.calls.approved.length === 0; i += 1) {
+    hive.receive({ id: `kick-${i}`, from: 'michael', to: 'worker', act: 'request', subject: 'x', body: 'y' });
+    await host.tick();
+  }
+
+  assert.deepEqual(client.calls.approved, [{ toolCallId: 'tc_1', approved: true }]);
 });
 
 // ──────────────────────────────── other guards ────────────────────────────────

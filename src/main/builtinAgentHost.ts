@@ -26,6 +26,9 @@ export interface ChatTurn {
 /** Recent tail kept per seat. Older turns fall off; the record is the board. */
 const MAX_KEPT_TURNS = 60;
 
+/** How long a relayed gate waits for the god before it is denied. */
+const DEFAULT_APPROVAL_RELAY_MS = 120_000;
+
 /** A 程小帮 run that is currently in flight for one seat. */
 interface ChengxiaobangActiveRun {
   sessionId: string;
@@ -35,6 +38,17 @@ interface ChengxiaobangActiveRun {
   /** Every tool call seen, latest status each. A call sitting on
    *  `pending_approval` is what the run is blocked on. */
   toolCalls: Map<string, ChengxiaobangToolCall>;
+  /** True when nobody is at the keyboard: the gate goes to the god instead. */
+  unattended: boolean;
+}
+
+/** A permission gate relayed to the god, waiting on its answer. */
+interface ChengxiaobangApprovalRelay {
+  toolCallId: string;
+  name: string;
+  requestedAt: number;
+  /** id of the mail we sent, so the reply can be matched to it. */
+  requestId: string;
 }
 
 /**
@@ -71,6 +85,8 @@ export class BuiltinAgentHost {
     /** Seat-assembled system prompt (floor manual, role card). */
     systemPrompt?: (hive: HiveManager, agentId: string, agentName: string) => string | undefined;
     maxSteps?: number;
+    /** How long an unattended permission gate waits for the god (default 120s). */
+    approvalRelayMs?: number;
     /** Progress sink for the seat's chat surface. */
     onEvent?: (projectId: string, agentId: string, event: AgentRunEvent) => void;
     /** Called after a model run so callers can record the trace. */
@@ -126,6 +142,8 @@ export class BuiltinAgentHost {
   /** The last finished run per seat, for undo: its id and what it changed. Kept
    *  after the run ends because undoing is something you do afterwards. */
   private cbLastRun = new Map<string, { runId: string; fileChanges: ChengxiaobangFileChange[] }>();
+  /** Permission gates we handed to the god because nobody was at the keyboard. */
+  private cbRelays = new Map<string, ChengxiaobangApprovalRelay>();
 
   chatHistory(projectId: string, agentId: string): ChatTurn[] {
     return this.turns.get(`${projectId}|${agentId}`) ?? [];
@@ -176,6 +194,7 @@ export class BuiltinAgentHost {
         const task = manual ? `${manual}\n\n${text}` : text;
         const res = await this.runTracked(
           cb,
+          hive,
           key,
           sessionId,
           task,
@@ -349,6 +368,98 @@ export class BuiltinAgentHost {
     return res.ok;
   }
 
+  /** Hand a gate to the god, who is the human's proxy on this floor. */
+  private relayGateToGod(
+    hive: HiveManager,
+    key: string,
+    agentId: string,
+    call: ChengxiaobangToolCall
+  ): void {
+    if (this.cbRelays.has(key)) return;
+    const timeout = this.opts.approvalRelayMs ?? DEFAULT_APPROVAL_RELAY_MS;
+    try {
+      const msg = hive.send(
+        {
+          to: 'god',
+          from: agentId,
+          act: 'request',
+          subject: `permission needed: ${call.name}`,
+          body: [
+            `${agentId} is blocked on a permission gate and nobody is at the keyboard.`,
+            `Tool: ${call.name}`,
+            call.args ? `Arguments: ${JSON.stringify(call.args).slice(0, 800)}` : '',
+            '',
+            `Reply "agree" to allow it once, or "refuse" to deny. No answer within ${Math.round(timeout / 1000)}s denies it.`,
+            'If you cannot decide either, the ASK ME board is yours to put it on.'
+          ]
+            .filter(Boolean)
+            .join('\n'),
+          requires_reply: true
+        },
+        agentId
+      );
+      this.cbRelays.set(key, {
+        toolCallId: call.id,
+        name: call.name,
+        requestedAt: Date.now(),
+        requestId: msg.id
+      });
+    } catch {
+      /* a gate we cannot raise must not take the run down with it */
+    }
+  }
+
+  /**
+   * Answer the gates we relayed: the god's reply if it came, a deny if it did
+   * not. Denying on timeout is deliberate — an unattended agent must never be
+   * allowed to do something nobody approved.
+   */
+  private async resolveApprovalRelays(hive: HiveManager): Promise<void> {
+    if (this.cbRelays.size === 0) return;
+    const client = this.opts.chengxiaobang?.() ?? null;
+    if (!client) return;
+    const timeout = this.opts.approvalRelayMs ?? DEFAULT_APPROVAL_RELAY_MS;
+    for (const [key, relay] of [...this.cbRelays]) {
+      if (!key.startsWith(`${hive.projectId}|`)) continue;
+      const agentId = key.slice(hive.projectId.length + 1);
+      let reply: HiveMessage | undefined;
+      try {
+        reply = hive
+          .inbox(agentId)
+          .find((m) => m.in_reply_to === relay.requestId);
+      } catch {
+        continue;
+      }
+      let approved: boolean | undefined;
+      if (reply) {
+        approved = reply.act === 'agree' || reply.act === 'done';
+        hive.archiveInbox(agentId, reply.id);
+      } else if (Date.now() - relay.requestedAt >= timeout) {
+        approved = false;
+      }
+      if (approved === undefined) continue;
+      this.cbRelays.delete(key);
+      await client.approve(relay.toolCallId, { approved });
+      if (!reply) {
+        try {
+          hive.send(
+            {
+              to: 'god',
+              from: agentId,
+              act: 'inform',
+              subject: `permission denied, no answer: ${relay.name}`,
+              body: `${relay.name} was denied after ${Math.round(timeout / 1000)}s with no reply. Raise it yourself if it should go to the human.`,
+              requires_reply: false
+            },
+            agentId
+          );
+        } catch {
+          /* best effort */
+        }
+      }
+    }
+  }
+
   // ── Mid-run control (the seat's own stop / steer) ───────────────────────────
 
   /** Is this seat mid-run? Drives the stop and steer controls in its panel. */
@@ -435,16 +546,23 @@ export class BuiltinAgentHost {
    */
   private async runTracked(
     client: ChengxiaobangClient,
+    hive: HiveManager,
     key: string,
     sessionId: string,
     task: string,
     projectId: string,
     agentId: string,
     model?: string,
-    accessMode?: 'approval' | 'smart_approval' | 'full_access'
+    accessMode?: 'approval' | 'smart_approval' | 'full_access',
+    unattended = false
   ): Promise<ChengxiaobangRunResult> {
     const controller = new AbortController();
-    const active: ChengxiaobangActiveRun = { sessionId, abort: () => controller.abort(), toolCalls: new Map() };
+    const active: ChengxiaobangActiveRun = {
+      sessionId,
+      abort: () => controller.abort(),
+      toolCalls: new Map(),
+      unattended
+    };
     this.cbActive.set(key, active);
     let result: ChengxiaobangRunResult;
     try {
@@ -463,6 +581,11 @@ export class BuiltinAgentHost {
             name: call.name,
             ok: call.status !== 'pending_approval'
           });
+          // Nobody is at the keyboard, so the gate goes up the ladder instead of
+          // waiting for a click nobody will make. Never ALLOW by default.
+          if (call.status === 'pending_approval' && unattended) {
+            this.relayGateToGod(hive, key, agentId, call);
+          }
         }
       });
     } finally {
@@ -506,12 +629,18 @@ export class BuiltinAgentHost {
 
     const res = await this.runTracked(
       client,
+      hive,
       key,
       sessionId,
       this.chengxiaobangTaskFor(agentName, mail, hive, agentId, primed),
       hive.projectId,
       agentId,
-      this.opts.chengxiaobangModel?.(agentId)
+      this.opts.chengxiaobangModel?.(agentId),
+      // A run woken by mail has nobody at the keyboard, so it runs with gates ON
+      // and hands any gate to the god — see relayGateToGod. The alternative,
+      // leaving it on the app default, gates nothing at all.
+      'approval',
+      true
     );
     this.cbPrimed.add(key);
     this.opts.onRun?.({
@@ -574,6 +703,9 @@ export class BuiltinAgentHost {
     try {
       const cfg = this.opts.llmConfig?.() ?? null;
       for (const hive of this.opts.listHives()) {
+        // Gates we handed to the god are answered before new mail is taken, so a
+        // blocked run is never waiting behind its own permission request.
+        await this.resolveApprovalRelays(hive);
         let reg: ReturnType<HiveManager['registry']>;
         try { reg = hive.registry(); } catch { continue; }
         for (const [id, agent] of Object.entries(reg.agents)) {
