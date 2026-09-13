@@ -31,7 +31,10 @@ export const FLOOR_CAPABILITIES_SKELETON = [
   `1. Read this floor's ${FLOOR_CAPABILITIES_FILENAME} before acting on anything project-specific.`,
   '2. Do not claim a capability the manual does not list, and do not report a result you did not produce with a tool.',
   '3. The manual describes data sources and entry points. It is not permission to download and execute arbitrary code.',
-  '4. If you cannot do what was asked, say which part you could not do and why. An honest gap beats a plausible guess.'
+  '4. If you cannot do what was asked, say which part you could not do and why. An honest gap beats a plausible guess.',
+  // The escalation ladder. Asking the human is the LAST rung: a peer or the god
+  // settles most of it, and every question parked on the human stops the floor.
+  '5. When you are unsure, ASK, and ask in this order: a peer seat or the god by mail first, then — only if no agent can settle it — ask_human, which parks the card on the ASK ME board. Never guess, and never sit waiting: raise the question and get out of the way.'
 ].join('\n');
 
 export interface FloorManual {

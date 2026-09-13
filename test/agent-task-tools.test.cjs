@@ -50,12 +50,68 @@ test.beforeEach(() => resetTaskDedupe());
 
 test('a worker is not offered the create tool at all', () => {
   const tools = taskTools(board());
-  assert.deepEqual(Object.keys(tools).sort(), ['task_list', 'task_update']);
+  assert.deepEqual(Object.keys(tools).sort(), ['ask_human', 'task_list', 'task_update']);
 });
 
-test('a lead is offered all three', () => {
+test('a lead is offered all four', () => {
   const tools = taskTools(board(), { isLead: true, seatId: 'michael' });
-  assert.deepEqual(Object.keys(tools).sort(), ['task_create', 'task_list', 'task_update']);
+  assert.deepEqual(Object.keys(tools).sort(), ['ask_human', 'task_create', 'task_list', 'task_update']);
+});
+
+// ────────────────────────────── ask the human ────────────────────────────────
+
+test('asking the human blocks the card and appends the question', async () => {
+  const host = board([{ id: 't-1', title: 'x', assignee: 'worker', status: 'doing', dependsOn: [], priority: 0, createdAt: 'now' }]);
+  const tools = taskTools(host, { seatId: 'worker' });
+
+  const res = await tools.ask_human.run({ id: 't-1', question: '用哪个口径？' });
+
+  assert.equal(res.ok, true);
+  assert.equal(host.cards[0].status, 'blocked');
+  assert.equal(host.cards[0].humanQA.length, 1);
+  assert.equal(host.cards[0].humanQA[0].q, '用哪个口径？');
+  assert.ok(host.cards[0].humanQA[0].askedAt);
+});
+
+test('asking keeps the earlier questions instead of replacing them', async () => {
+  const host = board([
+    {
+      id: 't-1',
+      title: 'x',
+      assignee: 'worker',
+      status: 'blocked',
+      dependsOn: [],
+      priority: 0,
+      createdAt: 'now',
+      humanQA: [{ q: '第一次问的', askedAt: 'earlier', a: '答了' }]
+    }
+  ]);
+  const tools = taskTools(host, { seatId: 'worker' });
+
+  await tools.ask_human.run({ id: 't-1', question: '第二次问的' });
+
+  assert.deepEqual(host.cards[0].humanQA.map((e) => e.q), ['第一次问的', '第二次问的']);
+  assert.equal(host.cards[0].humanQA[0].a, '答了', 'the answered entry is untouched');
+});
+
+test('a worker cannot park a question on another seat’s card', async () => {
+  const host = board([{ id: 't-1', title: 'x', assignee: 'someone-else', status: 'doing', dependsOn: [], priority: 0, createdAt: 'now' }]);
+  const tools = taskTools(host, { seatId: 'worker' });
+
+  const res = await tools.ask_human.run({ id: 't-1', question: '?' });
+
+  assert.equal(res.ok, false);
+  assert.match(res.error, /not assigned to this seat/);
+  assert.equal(host.cards[0].status, 'doing');
+});
+
+test('asking needs a card and a question', async () => {
+  const host = board([{ id: 't-1', title: 'x', assignee: 'worker', status: 'doing', dependsOn: [], priority: 0, createdAt: 'now' }]);
+  const tools = taskTools(host, { seatId: 'worker' });
+
+  assert.match((await tools.ask_human.run({ question: '?' })).error, /id is required/);
+  assert.match((await tools.ask_human.run({ id: 't-1' })).error, /question is required/);
+  assert.match((await tools.ask_human.run({ id: 'nope', question: '?' })).error, /no card nope/);
 });
 
 // ─────────────────────────────────── create ───────────────────────────────────

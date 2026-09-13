@@ -19,7 +19,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import type { AgentToolDef, AgentToolResult } from './agentRuntime';
-import type { HiveTask } from './hive';
+import type { HiveTask, HumanQA } from './hive';
 
 /** Ceiling on cards one lead run may add. Sized for a full fan-out plus slack. */
 export const CREATE_CAP_PER_RUN = 16;
@@ -136,6 +136,41 @@ export function createAgentTaskTools(ctx: AgentTaskContext): AgentToolDef[] {
         if (!Object.keys(patch).length) return { ok: false, error: 'nothing to update' };
         return ctx.host.patchTask(id, patch)
           ? { ok: true, output: `updated ${id} (${Object.keys(patch).join(', ')})` }
+          : { ok: false, error: `no card ${id} on this board` };
+      }
+    },
+    {
+      name: 'ask_human',
+      description:
+        'Raise a question only the human can answer. Ask a PEER or the god by mail FIRST. This is the last rung, for when no agent can decide. The card goes blocked and the question appears on the floor’s ASK ME board; never sit waiting on an answer.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Card id to park the question on.' },
+          question: { type: 'string', description: 'The decision you need, in one short paragraph.' }
+        },
+        required: ['id', 'question']
+      },
+      run: async (input) => {
+        const id = str(input, 'id');
+        if (!id) return { ok: false, error: 'id is required' };
+        const question = str(input, 'question');
+        if (!question) return { ok: false, error: 'question is required' };
+        const card = cardsOf(ctx.host).find((c) => c.id === id);
+        if (!card) return { ok: false, error: `no card ${id} on this board` };
+        if (!ctx.isLead && card.assignee !== ctx.seatId) {
+          return { ok: false, error: `card ${id} is not assigned to this seat` };
+        }
+        // Same shape the orchestrator writes: status blocked + an appended entry,
+        // never a replacement, because past questions document the card's
+        // decisions and the ASK ME board shows the open one.
+        const entry: HumanQA = { q: question, askedAt: new Date().toISOString() };
+        const ok = ctx.host.patchTask(id, {
+          status: 'blocked',
+          humanQA: [...(card.humanQA ?? []), entry]
+        });
+        return ok
+          ? { ok: true, output: `asked on ${id} — it is blocked and on the ASK ME board` }
           : { ok: false, error: `no card ${id} on this board` };
       }
     }

@@ -146,9 +146,9 @@ test('the seat is given the full tool set and a task naming the sender', async (
 
   await host.tick();
 
-  // A worker gets the board read/list tools but never task_create.
+  // A worker gets the board read/list tools and the human gate, never task_create.
   assert.deepEqual(client.calls[0].tools, [
-    'fs_list', 'fs_read', 'fs_write', 'shell_run', 'mail_send', 'mail_inbox', 'task_list', 'task_update'
+    'fs_list', 'fs_read', 'fs_write', 'shell_run', 'mail_send', 'mail_inbox', 'task_list', 'task_update', 'ask_human'
   ]);
 });
 
