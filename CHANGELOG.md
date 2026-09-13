@@ -36,6 +36,22 @@ All notable changes to this project are documented here. The format is based on
   "model is not currently supported". Shipping the subscription list would have been a picker of
   thirty entries that fail on click. Pointing this engine at 程小帮's own backend instead is a
   separate piece of work: it needs its own credential, which its local API does not expose.
+- **Shipped that piece: a 程小帮 seat now runs through 程小帮's own run protocol.** Its local API
+  runs agents itself — a session plus an event stream (`POST /api/sessions` → `POST /api/runs/stream`)
+  with abort, steering, tool approvals and file-change revert — so a seat on that engine hands the
+  task over whole and delivers the answer it gets back, instead of being wrapped in our tool loop
+  (程小帮's run is already an agent; nesting two would double it). One session per seat, kept for the
+  process so the conversation is continuous, and deleted on stop so the app's own conversation list
+  does not collect one entry per seat. The floor manual rides along on the first turn only, since the
+  session remembers it.
+  The model vocabulary is now 程小帮's: the caller asks for `auto` and the app resolves it
+  (`auto` → `auto(free)`) and picks the provider itself. That is what settled the earlier question —
+  the subscription ids were never the wrong list, they were waiting on the right endpoint.
+  The token is the local app's, so the client refuses to send it anywhere but loopback. It is only in
+  the environment when this app was launched by 程小帮 (it exports `CHENGXIAOBANG_API_TOKEN` for its
+  children); without it, 程小帮 seats stay on the template reply rather than failing.
+  Verified against the running app: session created, one prompt run end to end, answer received with
+  token usage, session deleted.
 - **Seats that run in-process can leave the floor.** The kill button was the only way off a floor and
   it required a live PTY, so a Built-in or 程小帮 seat had no exit at all — the seat had to be removed
   by editing files. Such seats now get their own ✕, which archives them without pretending to

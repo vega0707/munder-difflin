@@ -18,6 +18,7 @@ import {
   modelForRole, OPS_STANDUP_MISSION, HEARTBEAT_MISSION, COMPACT_MAINTENANCE_MISSION, type HarnessConfig, type ScheduledMission
 } from './config';
 import { resolveAgentLlmConfig } from './agentLlmCreds';
+import { ChengxiaobangClient } from './chengxiaobangClient';
 import type { AgentRunEvent } from './agentRuntime';
 import { assembleSeatPrompt, readFloorCapabilities } from './floorCapabilities';
 import { listDir, readFileText, readFileBinary, writeFileText, statAbs, expandTilde } from './fs';
@@ -641,6 +642,9 @@ async function publishFloor(projectId: string): Promise<void> {
   const floor = floorCatalogOf(projectId);
   if (floor) await seatBoard.putFloor(floor);
 }
+/** Built lazily: the constructor throws when the local app's token is absent,
+ *  and that must not take the whole host down. */
+let chengxiaobangClient: ChengxiaobangClient | null = null;
 const builtinHost = new BuiltinAgentHost({
   listHives: () => projectRegistry.listHives(),
   occupancy: (projectId, agentId) => seatBoard.occupancy(projectId, agentId),
@@ -669,7 +673,18 @@ const builtinHost = new BuiltinAgentHost({
       manual: readFloorCapabilities(hiveRoot)
     });
   },
-  maxSteps: 24
+  maxSteps: 24,
+  // A 程小帮 seat is served by the 程小帮 app itself. The token is only present
+  // when this app was launched by 程小帮 (it exports CHENGXIAOBANG_API_TOKEN for
+  // its children), so a from-Finder launch simply keeps those seats on the
+  // template reply rather than failing.
+  chengxiaobang: () => {
+    try {
+      return chengxiaobangClient ??= new ChengxiaobangClient();
+    } catch {
+      return null;
+    }
+  }
 });
 /** The PRIMARY window — the one running the hive/god orchestration and the sink
  *  for process-global timer events (missions, breaker, Slack ingestion). It is

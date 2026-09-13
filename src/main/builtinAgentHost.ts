@@ -4,6 +4,7 @@ import { AgentRuntime, type AgentRunEvent, type AgentRunResult, type AgentToolTr
 import { createAgentTools } from './agentTools';
 import { createAgentLlm } from './agentLlm';
 import type { AgentLlmConfig } from './agentLlmCreds';
+import type { ChengxiaobangClient } from './chengxiaobangClient';
 import type { HiveManager, HiveMessage } from './hive';
 import type { SeatOccupancy } from '../shared/seats';
 
@@ -41,6 +42,11 @@ export class BuiltinAgentHost {
     intervalMs?: number;
     /** Model channel for builtin seats. Absent/null → template replies. */
     llmConfig?: () => AgentLlmConfig | null;
+    /** 程小帮 client for seats on that engine; null (no local app / no token)
+     *  leaves those seats on the template reply. */
+    chengxiaobang?: () => ChengxiaobangClient | null;
+    /** Model for a 程小帮 seat. Omitted leaves the choice to the app. */
+    chengxiaobangModel?: (agentId: string) => string | undefined;
     /** Builds the client for a channel. Overridden in tests with a scripted one. */
     createClient?: (cfg: AgentLlmConfig) => LlmClient;
     /** Absolute workspace for one seat, or null when it has no usable cwd. */
@@ -71,6 +77,14 @@ export class BuiltinAgentHost {
   stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    // The sessions we opened are ours to close: leaving them behind would fill
+    // 程小帮's own conversation list with one entry per seat.
+    const client = this.opts.chengxiaobang?.() ?? null;
+    if (client) {
+      for (const sessionId of this.cbSessions.values()) void client.deleteSession(sessionId);
+    }
+    this.cbSessions.clear();
+    this.cbPrimed.clear();
   }
 
   /** The client for the current channel, rebuilt only when the channel changes. */
@@ -86,6 +100,10 @@ export class BuiltinAgentHost {
    *  visible conversation, not the record of what happened — hive mail and the
    *  task board are. A restart is allowed to lose it. */
   private turns = new Map<string, ChatTurn[]>();
+  /** One 程小帮 session per seat, opened lazily and closed on stop(). */
+  private cbSessions = new Map<string, string>();
+  /** Seats whose 程小帮 session has already been given the floor manual. */
+  private cbPrimed = new Set<string>();
 
   chatHistory(projectId: string, agentId: string): ChatTurn[] {
     return this.turns.get(`${projectId}|${agentId}`) ?? [];
@@ -262,6 +280,93 @@ export class BuiltinAgentHost {
     return res.ok;
   }
 
+  /**
+   * Hand a seat's mail to 程小帮 and deliver its answer.
+   *
+   * One session per seat, kept for the life of this process so the seat has a
+   * continuous conversation, and deleted on stop() so the app's own session list
+   * is not littered with one entry per run. The floor manual rides along on the
+   * FIRST turn only: the session remembers it, and repeating it on every message
+   * would pay for it every time.
+   */
+  private async handleWithChengxiaobang(
+    hive: HiveManager,
+    agentId: string,
+    agentName: string,
+    meta: { cwd?: unknown; isGod?: boolean; role?: string },
+    mail: HiveMessage[]
+  ): Promise<boolean> {
+    const client = this.opts.chengxiaobang?.() ?? null;
+    if (!client) return false;
+
+    const key = `${hive.projectId}|${agentId}`;
+    const primed = this.cbPrimed.has(key);
+    let sessionId = this.cbSessions.get(key);
+    if (!sessionId) {
+      const session = await client.createSession({ title: `${agentName} · ${hive.projectId}` });
+      sessionId = session.id;
+      this.cbSessions.set(key, sessionId);
+    }
+
+    const res = await client.run(sessionId, this.chengxiaobangTaskFor(agentName, mail, hive, agentId, primed), {
+      model: this.opts.chengxiaobangModel?.(agentId),
+      onEvent: (type) =>
+        this.opts.onEvent?.(hive.projectId, agentId, { kind: 'tool', name: type, ok: true })
+    });
+    this.cbPrimed.add(key);
+    this.opts.onRun?.({
+      projectId: hive.projectId,
+      agentId,
+      ok: res.ok,
+      text: res.text,
+      error: res.error
+    });
+    if (!res.ok) return false;
+
+    const first = mail[0];
+    if (first && res.text.trim()) {
+      hive.send(
+        {
+          to: first.from,
+          from: agentId,
+          act: first.act === 'query' ? 'inform' : 'done',
+          subject: `Re: ${first.subject ?? ''}`,
+          body: res.text,
+          in_reply_to: first.id,
+          conversation: first.conversation,
+          requires_reply: false
+        },
+        agentId
+      );
+    }
+    return true;
+  }
+
+  /** The mail as a task for 程小帮. No tool instructions: it brings its own. */
+  private chengxiaobangTaskFor(
+    agentName: string,
+    mail: HiveMessage[],
+    hive: HiveManager,
+    agentId: string,
+    primed: boolean
+  ): string {
+    const body = mail
+      .map((m) => `From ${m.from}, act=${m.act ?? 'inform'}, subject: ${m.subject ?? '(none)'}\n${m.body ?? ''}`)
+      .join('\n---\n');
+    const lines: string[] = [];
+    if (!primed) {
+      const manual = this.opts.systemPrompt?.(hive, agentId, agentName);
+      if (manual) lines.push(manual, '');
+    }
+    lines.push(
+      `You are ${agentName}, a seat on this office floor. Answer the mail below.`,
+      'Reply in plain text; the harness delivers your answer back to the sender.',
+      '',
+      body
+    );
+    return lines.join('\n');
+  }
+
   async tick(): Promise<number> {
     if (this.ticking) return 0;
     this.ticking = true;
@@ -281,7 +386,21 @@ export class BuiltinAgentHost {
           if (mail.length === 0) continue;
 
           let modelHandled = false;
-          if (cfg) {
+          if (agent.provider === 'chengxiaobang') {
+            // 程小帮's run is already an agent with its own tools, so the seat
+            // hands the task over whole instead of wrapping it in ours.
+            try {
+              modelHandled = await this.handleWithChengxiaobang(hive, id, agent.name, agent, mail);
+            } catch (err) {
+              this.opts.onRun?.({
+                projectId: hive.projectId,
+                agentId: id,
+                ok: false,
+                error: err instanceof Error ? err.message : String(err)
+              });
+              modelHandled = false;
+            }
+          } else if (cfg) {
             try {
               modelHandled = await this.handleWithModel(hive, id, agent.name, agent, mail, cfg);
             } catch (err) {

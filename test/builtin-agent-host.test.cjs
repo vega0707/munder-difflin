@@ -336,6 +336,114 @@ test('a 程小帮 seat is served by the same host, not skipped as a non-builtin 
   assert.equal(hive.remaining.length, 0);
 });
 
+// ────────────────────────── 程小帮 seats (run protocol) ──────────────────────
+
+function fakeCxbClient({ fail = false, text = '程小帮的回答' } = {}) {
+  const calls = { created: [], runs: [], deleted: [] };
+  return {
+    calls,
+    createSession: async (input) => {
+      calls.created.push(input);
+      return { id: `s_${calls.created.length}`, providerId: 'ctrip-chat' };
+    },
+    run: async (sessionId, prompt, opts) => {
+      calls.runs.push({ sessionId, prompt, model: opts?.model });
+      if (fail) return { ok: false, text: '', error: 'app down', events: [] };
+      return { ok: true, text, status: 'completed', runId: 'run_1', events: ['run_started', 'delta', 'run_end'] };
+    },
+    deleteSession: async (id) => {
+      calls.deleted.push(id);
+      return true;
+    }
+  };
+}
+
+function cbHost(hive, client, extra = {}) {
+  return hostFor(hive, {
+    llmConfig: () => null,
+    chengxiaobang: () => client,
+    ...extra
+  });
+}
+
+test('a 程小帮 seat runs the mail through the app and delivers its answer', async () => {
+  const hive = fakeHive({ cwd: tempWorkspace(), inbox: MAIL, provider: 'chengxiaobang' });
+  const client = fakeCxbClient({ text: '分析完成了' });
+  const { host } = cbHost(hive, client);
+
+  assert.equal(await host.tick(), 1);
+
+  assert.equal(client.calls.created.length, 1);
+  assert.equal(client.calls.runs.length, 1);
+  assert.equal(client.calls.runs[0].sessionId, 's_1');
+  assert.match(client.calls.runs[0].prompt, /please build/);
+
+  assert.equal(hive.sent.length, 1);
+  assert.equal(hive.sent[0].to, 'michael');
+  assert.equal(hive.sent[0].from, 'worker');
+  assert.equal(hive.sent[0].body, '分析完成了');
+  assert.equal(hive.remaining.length, 0);
+});
+
+test('the seat keeps one session across turns so the conversation is continuous', async () => {
+  const hive = fakeHive({ cwd: tempWorkspace(), inbox: MAIL, provider: 'chengxiaobang' });
+  const client = fakeCxbClient();
+  const { host } = cbHost(hive, client);
+
+  await host.tick();
+  hive.receive({ id: 'm2', from: 'michael', to: 'worker', act: 'request', subject: 'again', body: 'more' });
+  await host.tick();
+
+  assert.equal(client.calls.created.length, 1, 'the second turn reuses the session');
+  assert.deepEqual(client.calls.runs.map((r) => r.sessionId), ['s_1', 's_1']);
+});
+
+test('the floor manual rides along once, not on every message', async () => {
+  const hive = fakeHive({ cwd: tempWorkspace(), inbox: MAIL, provider: 'chengxiaobang' });
+  const client = fakeCxbClient();
+  const { host } = cbHost(hive, client, { systemPrompt: () => 'FLOOR MANUAL' });
+
+  await host.tick();
+  hive.receive({ id: 'm2', from: 'michael', to: 'worker', act: 'request', subject: 'again', body: 'more' });
+  await host.tick();
+
+  assert.match(client.calls.runs[0].prompt, /FLOOR MANUAL/);
+  assert.ok(!client.calls.runs[1].prompt.includes('FLOOR MANUAL'), 'the session already has it');
+});
+
+test('no local app leaves the seat on the template reply', async () => {
+  const hive = fakeHive({ cwd: tempWorkspace(), inbox: MAIL, provider: 'chengxiaobang' });
+  const { host } = hostFor(hive, { llmConfig: () => null, chengxiaobang: () => null });
+
+  assert.equal(await host.tick(), 1);
+  assert.equal(hive.sent.length, 1, 'the seat still answered');
+  assert.equal(hive.remaining.length, 0);
+});
+
+test('a failed run falls back to the template instead of stalling the floor', async () => {
+  const hive = fakeHive({ cwd: tempWorkspace(), inbox: MAIL, provider: 'chengxiaobang' });
+  const client = fakeCxbClient({ fail: true });
+  const { host, runs } = cbHost(hive, client);
+
+  assert.equal(await host.tick(), 1);
+
+  assert.equal(hive.sent.length, 1, 'the seat still answered');
+  assert.equal(hive.remaining.length, 0);
+  assert.equal(runs[0].ok, false);
+  assert.match(runs[0].error, /app down/);
+});
+
+test('stopping the host closes the sessions it opened', async () => {
+  const hive = fakeHive({ cwd: tempWorkspace(), inbox: MAIL, provider: 'chengxiaobang' });
+  const client = fakeCxbClient();
+  const { host } = cbHost(hive, client);
+
+  await host.tick();
+  host.stop();
+
+  assert.deepEqual(client.calls.deleted, ['s_1'], 'leaving it behind would litter 程小帮’s own list');
+});
+
 // ──────────────────────────────── other guards ────────────────────────────────
 
 test('a seat leased to another machine is left alone', async () => {
