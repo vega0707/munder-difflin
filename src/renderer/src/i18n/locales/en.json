@@ -12,7 +12,15 @@
     "stop": "stop",
     "steer": "interject",
     "steerHint": "working — what you send joins the run at its next step boundary",
-    "steerTag": "(interjected)"
+    "steerTag": "(interjected)",
+    "needsPermission": "{{name}} needs permission before the run can continue",
+    "allowOnce": "allow once",
+    "allowProject": "always allow in this project",
+    "deny": "deny",
+    "changes": "this run changed {{count}} file(s)",
+    "changesUndone": "this run's changes were undone",
+    "undo": "undo",
+    "redo": "redo"
   },
   "common": {
     "on": "on",

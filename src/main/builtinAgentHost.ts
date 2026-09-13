@@ -6,6 +6,11 @@ import { createAgentLlm } from './agentLlm';
 import type { AgentLlmConfig } from './agentLlmCreds';
 import type { ChengxiaobangClient } from './chengxiaobangClient';
 import type { ChengxiaobangRunResult } from '../shared/chengxiaobang';
+import type {
+  ChengxiaobangFileChange,
+  ChengxiaobangRevertDirection,
+  ChengxiaobangToolCall
+} from '../shared/chengxiaobang';
 import type { HiveManager, HiveMessage } from './hive';
 import type { SeatOccupancy } from '../shared/seats';
 
@@ -27,6 +32,9 @@ interface ChengxiaobangActiveRun {
   /** Known only once `run_started` arrives; steering needs it. */
   runId?: string;
   abort: () => void;
+  /** Every tool call seen, latest status each. A call sitting on
+   *  `pending_approval` is what the run is blocked on. */
+  toolCalls: Map<string, ChengxiaobangToolCall>;
 }
 
 /**
@@ -115,6 +123,9 @@ export class BuiltinAgentHost {
   private cbPrimed = new Set<string>();
   /** Seats with a 程小帮 run in flight right now, so the UI can stop or steer it. */
   private cbActive = new Map<string, ChengxiaobangActiveRun>();
+  /** The last finished run per seat, for undo: its id and what it changed. Kept
+   *  after the run ends because undoing is something you do afterwards. */
+  private cbLastRun = new Map<string, { runId: string; fileChanges: ChengxiaobangFileChange[] }>();
 
   chatHistory(projectId: string, agentId: string): ChatTurn[] {
     return this.turns.get(`${projectId}|${agentId}`) ?? [];
@@ -170,7 +181,11 @@ export class BuiltinAgentHost {
           task,
           projectId,
           agentId,
-          this.opts.chengxiaobangModel?.(agentId)
+          this.opts.chengxiaobangModel?.(agentId),
+          // Someone is here and typing, so let a tool call stop and ask. A run
+          // woken by MAIL keeps the app's own default: blocking a seat on an
+          // answer nobody is present to give would just stall the floor.
+          'approval'
         );
         this.cbPrimed.add(key);
         this.opts.onRun?.({ projectId, agentId, ok: res.ok, text: res.text, error: res.error });
@@ -373,6 +388,44 @@ export class BuiltinAgentHost {
     return client.steer(active.runId, prompt);
   }
 
+  /** Tool calls this seat's run is waiting on an answer for. */
+  pendingApprovals(projectId: string, agentId: string): ChengxiaobangToolCall[] {
+    const active = this.cbActive.get(`${projectId}|${agentId}`);
+    if (!active) return [];
+    return [...active.toolCalls.values()].filter((call) => call.status === 'pending_approval');
+  }
+
+  /** Answer one of them. `approvalScope: 'project'` trusts the same tool
+   *  signature for the project from then on; omitted approves just this once. */
+  async approveSeat(
+    projectId: string,
+    agentId: string,
+    toolCallId: string,
+    opts: { approved: boolean; approvalScope?: 'project' }
+  ): Promise<{ ok: boolean; accepted?: boolean; error?: string }> {
+    const client = this.opts.chengxiaobang?.() ?? null;
+    if (!client) return { ok: false, error: '程小帮 is not reachable' };
+    return client.approve(toolCallId, opts);
+  }
+
+  /** What the seat's last finished run changed — empty when it changed nothing. */
+  lastFileChanges(projectId: string, agentId: string): ChengxiaobangFileChange[] {
+    return this.cbLastRun.get(`${projectId}|${agentId}`)?.fileChanges ?? [];
+  }
+
+  /** Undo or redo the last finished run's changes. */
+  async revertSeat(
+    projectId: string,
+    agentId: string,
+    opts: { direction: ChengxiaobangRevertDirection; paths?: string[] }
+  ): Promise<{ ok: boolean; error?: string }> {
+    const last = this.cbLastRun.get(`${projectId}|${agentId}`);
+    if (!last) return { ok: false, error: 'this seat has no finished run with file changes' };
+    const client = this.opts.chengxiaobang?.() ?? null;
+    if (!client) return { ok: false, error: '程小帮 is not reachable' };
+    return client.revertFileChanges(last.runId, opts);
+  }
+
   /**
    * Run one 程小帮 task while keeping it addressable.
    *
@@ -387,24 +440,40 @@ export class BuiltinAgentHost {
     task: string,
     projectId: string,
     agentId: string,
-    model?: string
+    model?: string,
+    accessMode?: 'approval' | 'smart_approval' | 'full_access'
   ): Promise<ChengxiaobangRunResult> {
     const controller = new AbortController();
-    const active: ChengxiaobangActiveRun = { sessionId, abort: () => controller.abort() };
+    const active: ChengxiaobangActiveRun = { sessionId, abort: () => controller.abort(), toolCalls: new Map() };
     this.cbActive.set(key, active);
+    let result: ChengxiaobangRunResult;
     try {
-      return await client.run(sessionId, task, {
+      result = await client.run(sessionId, task, {
         ...(model ? { model } : {}),
+        ...(accessMode ? { accessMode } : {}),
         signal: controller.signal,
         onEvent: (event) => {
           if (event.runId && !active.runId) active.runId = event.runId;
           this.opts.onEvent?.(projectId, agentId, { kind: 'tool', name: event.type, ok: true });
+        },
+        onToolCall: (call) => {
+          active.toolCalls.set(call.id, call);
+          this.opts.onEvent?.(projectId, agentId, {
+            kind: 'tool',
+            name: call.name,
+            ok: call.status !== 'pending_approval'
+          });
         }
       });
     } finally {
       // Only clear our own entry: a later tick may already have replaced it.
       if (this.cbActive.get(key) === active) this.cbActive.delete(key);
     }
+    // Remember what it changed; undo happens after the run is over.
+    if (result.runId && result.fileChanges?.length) {
+      this.cbLastRun.set(key, { runId: result.runId, fileChanges: result.fileChanges });
+    }
+    return result;
   }
 
   /**

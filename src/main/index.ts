@@ -4309,12 +4309,55 @@ ipcMain.handle('agent:chat:history', (_evt, payload: unknown) => {
 // user typed something, so the panel asks rather than assuming.
 ipcMain.handle('agent:chat:running', (_evt, payload: unknown) => {
   const p = (payload ?? {}) as { projectId?: unknown; agentId?: unknown };
-  if (typeof p.agentId !== 'string' || !p.agentId) return { running: false };
+  if (typeof p.agentId !== 'string' || !p.agentId) return { running: false, pending: [] };
   const target = hiveIPC(p.projectId);
   return {
     running: builtinHost.isSeatRunning(target.projectId, p.agentId),
-    runId: builtinHost.activeRunId(target.projectId, p.agentId)
+    runId: builtinHost.activeRunId(target.projectId, p.agentId),
+    // A run sitting on `pending_approval` is blocked until someone answers, so
+    // it rides the same poll rather than needing a channel of its own.
+    pending: builtinHost.pendingApprovals(target.projectId, p.agentId)
   };
+});
+ipcMain.handle('agent:chat:approve', async (_evt, payload: unknown) => {
+  const p = (payload ?? {}) as {
+    projectId?: unknown;
+    agentId?: unknown;
+    toolCallId?: unknown;
+    approved?: unknown;
+    approvalScope?: unknown;
+  };
+  if (typeof p.agentId !== 'string' || !p.agentId) return { ok: false, error: 'Invalid request' };
+  if (typeof p.toolCallId !== 'string' || !p.toolCallId) return { ok: false, error: 'Invalid request' };
+  const target = hiveIPC(p.projectId);
+  return builtinHost.approveSeat(target.projectId, p.agentId, p.toolCallId, {
+    approved: p.approved === true,
+    ...(p.approvalScope === 'project' ? { approvalScope: 'project' as const } : {})
+  });
+});
+ipcMain.handle('agent:chat:changes', (_evt, payload: unknown) => {
+  const p = (payload ?? {}) as { projectId?: unknown; agentId?: unknown };
+  if (typeof p.agentId !== 'string' || !p.agentId) return [];
+  const target = hiveIPC(p.projectId);
+  return builtinHost.lastFileChanges(target.projectId, p.agentId);
+});
+ipcMain.handle('agent:chat:revert', async (_evt, payload: unknown) => {
+  const p = (payload ?? {}) as {
+    projectId?: unknown;
+    agentId?: unknown;
+    direction?: unknown;
+    paths?: unknown;
+  };
+  if (typeof p.agentId !== 'string' || !p.agentId) return { ok: false, error: 'Invalid request' };
+  if (p.direction !== 'undo' && p.direction !== 'redo') {
+    return { ok: false, error: 'direction must be undo or redo' };
+  }
+  const paths = Array.isArray(p.paths) ? p.paths.filter((x): x is string => typeof x === 'string') : undefined;
+  const target = hiveIPC(p.projectId);
+  return builtinHost.revertSeat(target.projectId, p.agentId, {
+    direction: p.direction,
+    ...(paths && paths.length ? { paths } : {})
+  });
 });
 ipcMain.handle('agent:chat:abort', async (_evt, payload: unknown) => {
   const p = (payload ?? {}) as { projectId?: unknown; agentId?: unknown };

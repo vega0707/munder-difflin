@@ -977,7 +977,32 @@ const api = {
   agentChatRunning: (payload: {
     projectId?: string;
     agentId: string;
-  }): Promise<{ running: boolean; runId?: string }> => ipcRenderer.invoke('agent:chat:running', payload),
+  }): Promise<{
+    running: boolean;
+    runId?: string;
+    pending: Array<{ id: string; name: string; status: string; args?: Record<string, unknown> }>;
+  }> => ipcRenderer.invoke('agent:chat:running', payload),
+  /** Answer a tool call the run is blocked on. `approvalScope: 'project'` trusts
+   *  the same tool signature for the project afterwards. */
+  agentChatApprove: (payload: {
+    projectId?: string;
+    agentId: string;
+    toolCallId: string;
+    approved: boolean;
+    approvalScope?: 'project';
+  }): Promise<{ ok: boolean; accepted?: boolean; error?: string }> =>
+    ipcRenderer.invoke('agent:chat:approve', payload),
+  /** Files this seat's last finished run changed. */
+  agentChatChanges: (payload: { projectId?: string; agentId: string }): Promise<
+    Array<{ path: string; operation?: string; additions?: number; deletions?: number }>
+  > => ipcRenderer.invoke('agent:chat:changes', payload),
+  /** Undo or redo those changes. */
+  agentChatRevert: (payload: {
+    projectId?: string;
+    agentId: string;
+    direction: 'undo' | 'redo';
+    paths?: string[];
+  }): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('agent:chat:revert', payload),
   /** Stop the run this seat is on. */
   agentChatAbort: (payload: { projectId?: string; agentId: string }): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('agent:chat:abort', payload),

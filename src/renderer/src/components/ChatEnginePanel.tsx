@@ -34,6 +34,11 @@ export function ChatEnginePanel({ agent }: ChatEnginePanelProps) {
   const [busy, setBusy] = useState(false);
   /** The seat is on a run — possibly one mail started, not just one typed here. */
   const [running, setRunning] = useState(false);
+  /** Tool calls the run is blocked on. Empty unless one needs an answer. */
+  const [pending, setPending] = useState<Array<{ id: string; name: string }>>([]);
+  /** Files the last finished run changed, and whether we already undid them. */
+  const [changes, setChanges] = useState<Array<{ path: string }>>([]);
+  const [undone, setUndone] = useState(false);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [channel, setChannel] = useState<{ ready: boolean; source?: string } | null>(null);
@@ -46,7 +51,11 @@ export function ChatEnginePanel({ agent }: ChatEnginePanelProps) {
     const ask = () => {
       void window.cth
         .agentChatRunning({ projectId, agentId: agent.id })
-        .then((info) => { if (alive) setRunning(info.running); })
+        .then((info) => {
+          if (!alive) return;
+          setRunning(info.running);
+          setPending((info.pending ?? []).map((p) => ({ id: p.id, name: p.name })));
+        })
         .catch(() => { /* app closing */ });
     };
     ask();
@@ -130,7 +139,52 @@ export function ChatEnginePanel({ agent }: ChatEnginePanelProps) {
     if (!res.ok) setError(res.error ?? t('agentChat.failed'));
     // The poll will clear `running`; drop it now so the button does not feel dead.
     setRunning(false);
+    setPending([]);
   }, [agent.id, projectId, t]);
+
+  /** Answer a tool call the run is blocked on. */
+  const answer = useCallback(
+    async (toolCallId: string, approved: boolean, approvalScope?: 'project') => {
+      setError(null);
+      const res = await window.cth.agentChatApprove({
+        projectId,
+        agentId: agent.id,
+        toolCallId,
+        approved,
+        ...(approvalScope ? { approvalScope } : {})
+      });
+      if (!res.ok) setError(res.error ?? t('agentChat.failed'));
+      setPending((prev) => prev.filter((p) => p.id !== toolCallId));
+    },
+    [agent.id, projectId, t]
+  );
+
+  // What the last run changed. Read when a run ends, and on mount, because undo
+  // is something you reach for after the fact.
+  useEffect(() => {
+    if (running) return;
+    let alive = true;
+    void window.cth.agentChatChanges({ projectId, agentId: agent.id }).then((files) => {
+      if (!alive) return;
+      setChanges(files.map((f) => ({ path: f.path })));
+      setUndone(false);
+    });
+    return () => { alive = false; };
+  }, [agent.id, projectId, running]);
+
+  const revert = useCallback(
+    async (direction: 'undo' | 'redo') => {
+      setError(null);
+      const res = await window.cth.agentChatRevert({ projectId, agentId: agent.id, direction });
+      if (!res.ok) {
+        setError(res.error ?? t('agentChat.failed'));
+        return;
+      }
+      setUndone(direction === 'undo');
+      if (direction === 'undo') setChanges([]);
+    },
+    [agent.id, projectId, t]
+  );
 
   const unavailable = channel !== null && !channel.ready;
 
@@ -185,6 +239,59 @@ export function ChatEnginePanel({ agent }: ChatEnginePanelProps) {
           <div style={{ fontSize: 11, color: 'var(--cth-red-700, #b3261e)', whiteSpace: 'pre-wrap' }}>{error}</div>
         )}
       </div>
+
+      {/* A run blocked on a tool call waits for an answer here. Without this the
+          seat would simply sit there looking busy with nothing saying why. */}
+      {pending.map((call) => (
+        <div
+          key={call.id}
+          style={{
+            borderTop: '1px solid var(--cth-coral, #b3261e)',
+            padding: 8,
+            background: 'var(--cth-paper-100)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6
+          }}
+        >
+          <span style={{ fontSize: 12, color: 'var(--cth-ink-700)' }}>
+            {t('agentChat.needsPermission', { name: call.name })}
+          </span>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <PixelButton size="sm" onClick={() => void answer(call.id, true)}>
+              {t('agentChat.allowOnce')}
+            </PixelButton>
+            <PixelButton size="sm" onClick={() => void answer(call.id, true, 'project')}>
+              {t('agentChat.allowProject')}
+            </PixelButton>
+            <PixelButton size="sm" variant="destructive" onClick={() => void answer(call.id, false)}>
+              {t('agentChat.deny')}
+            </PixelButton>
+          </div>
+        </div>
+      ))}
+
+      {/* What the last run changed. Undo lives here rather than in the IDE because
+          the change is the seat's, and undoing it is a decision about the seat. */}
+      {!running && (changes.length > 0 || undone) && (
+        <div
+          style={{
+            borderTop: '1px solid var(--cth-ink-300)',
+            padding: '6px 8px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8
+          }}
+        >
+          <span style={{ fontSize: 11, color: 'var(--cth-ink-500)' }}>
+            {undone ? t('agentChat.changesUndone') : t('agentChat.changes', { count: changes.length })}
+          </span>
+          <PixelButton size="sm" onClick={() => void revert(undone ? 'redo' : 'undo')}>
+            {undone ? t('agentChat.redo') : t('agentChat.undo')}
+          </PixelButton>
+        </div>
+      )}
 
       <div style={{ borderTop: '1px solid var(--cth-ink-300)', padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
         {unavailable ? (

@@ -12,7 +12,15 @@
     "stop": "停止",
     "steer": "插话",
     "steerHint": "正在跑 — 发出去的内容会在当前步骤结束时加入这次运行",
-    "steerTag": "（插话）"
+    "steerTag": "（插话）",
+    "needsPermission": "{{name}} 需要授权，run 才能继续",
+    "allowOnce": "允许一次",
+    "allowProject": "本项目内始终允许",
+    "deny": "拒绝",
+    "changes": "这次运行改了 {{count}} 个文件",
+    "changesUndone": "这次运行的改动已撤销",
+    "undo": "撤销",
+    "redo": "恢复"
   },
   "common": {
     "on": "开",

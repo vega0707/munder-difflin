@@ -27,7 +27,12 @@
  *   - The token is the LOCAL app's token. It is therefore only ever sent to a
  *     loopback address — see assertLoopback.
  */
-import type { ChengxiaobangRunResult, ChengxiaobangSession } from '../shared/chengxiaobang';
+import type {
+  ChengxiaobangRevertDirection,
+  ChengxiaobangRunResult,
+  ChengxiaobangSession,
+  ChengxiaobangToolCall
+} from '../shared/chengxiaobang';
 
 export interface ChengxiaobangClientOptions {
   baseUrl?: string;
@@ -108,6 +113,62 @@ export class ChengxiaobangClient {
     }
   }
 
+  /**
+   * Undo or redo the file changes a run made. `paths` omitted means every file
+   * the run touched that is operable in that direction.
+   */
+  async revertFileChanges(
+    runId: string,
+    opts: { direction: ChengxiaobangRevertDirection; paths?: string[] }
+  ): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const res = await this.fetchImpl(`${this.base}/api/runs/${encodeURIComponent(runId)}/file-changes/revert`, {
+        method: 'POST',
+        headers: { ...this.headers(), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          direction: opts.direction,
+          ...(opts.paths && opts.paths.length ? { paths: opts.paths } : {})
+        })
+      });
+      if (!res.ok) {
+        return { ok: false, error: `revert HTTP ${res.status}: ${(await res.text()).slice(0, 300)}` };
+      }
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * Answer a tool call the run stopped on.
+   *
+   * `approvalScope: 'project'` records this tool signature as trusted for the
+   * project; omitting it approves just this once.
+   */
+  async approve(
+    toolCallId: string,
+    opts: { approved: boolean; approvalScope?: 'project' }
+  ): Promise<{ ok: boolean; accepted?: boolean; error?: string }> {
+    if (!toolCallId) return { ok: false, error: 'no toolCallId' };
+    try {
+      const res = await this.fetchImpl(`${this.base}/api/approvals/${encodeURIComponent(toolCallId)}`, {
+        method: 'POST',
+        headers: { ...this.headers(), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          approved: opts.approved,
+          ...(opts.approvalScope ? { approvalScope: opts.approvalScope } : {})
+        })
+      });
+      if (!res.ok) {
+        return { ok: false, error: `approval HTTP ${res.status}: ${(await res.text()).slice(0, 200)}` };
+      }
+      const body = (await res.json()) as { accepted?: boolean };
+      return { ok: body.accepted !== false, ...(body.accepted !== undefined ? { accepted: body.accepted } : {}) };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
   async abortRun(runId: string): Promise<boolean> {
     try {
       const res = await this.fetchImpl(`${this.base}/api/runs/${encodeURIComponent(runId)}/abort`, {
@@ -164,9 +225,16 @@ export class ChengxiaobangClient {
     prompt: string,
     opts: {
       model?: string;
+      /** `approval` makes tool calls stop and wait for an answer; the app's own
+       *  default is `smart_approval`, which gates nothing we have seen. */
+      accessMode?: 'approval' | 'smart_approval' | 'full_access';
       /** Fires per frame. Carries the runId so a caller can steer or abort it
        *  WHILE it is running — the whole point of reading a stream. */
       onEvent?: (event: { type: string; runId?: string }) => void;
+      /** Fires on EVERY tool_call update, not once per type like onEvent. A call
+       *  goes announced → running → completed, or → `pending_approval`, and the
+       *  caller has to see the last of those while the run is still blocked. */
+      onToolCall?: (call: ChengxiaobangToolCall) => void;
       signal?: AbortSignal;
       timeoutMs?: number;
     } = {}
@@ -181,7 +249,12 @@ export class ChengxiaobangClient {
       const res = await this.fetchImpl(`${this.base}/api/runs/stream`, {
         method: 'POST',
         headers: { ...this.headers(), 'content-type': 'application/json', accept: 'text/event-stream' },
-        body: JSON.stringify({ sessionId, prompt, ...(opts.model ? { model: opts.model } : {}) }),
+        body: JSON.stringify({
+          sessionId,
+          prompt,
+          ...(opts.model ? { model: opts.model } : {}),
+          ...(opts.accessMode ? { accessMode: opts.accessMode } : {})
+        }),
         signal: controller.signal
       });
       if (!res.ok) {
@@ -193,7 +266,7 @@ export class ChengxiaobangClient {
         };
       }
       if (!res.body) return { ok: false, text: '', error: '程小帮 run returned no stream', events: [] };
-      return await readRunStream(res.body, opts.onEvent);
+      return await readRunStream(res.body, opts.onEvent, opts.onToolCall);
     } catch (err) {
       const aborted = controller.signal.aborted;
       return {
@@ -215,7 +288,8 @@ export class ChengxiaobangClient {
  */
 export async function readRunStream(
   body: ReadableStream<Uint8Array>,
-  onEvent?: (event: { type: string; runId?: string }) => void
+  onEvent?: (event: { type: string; runId?: string }) => void,
+  onToolCall?: (call: ChengxiaobangToolCall) => void
 ): Promise<ChengxiaobangRunResult> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -225,6 +299,10 @@ export async function readRunStream(
   let runId: string | undefined;
   let status: string | undefined;
   let usage: ChengxiaobangRunResult['usage'];
+  let fileChanges: ChengxiaobangRunResult['fileChanges'];
+  /** Keyed by tool call id: a call is announced, then updated to running, then
+   *  to completed — or to `pending_approval`, which is the state that waits. */
+  const toolCalls = new Map<string, NonNullable<ChengxiaobangRunResult['toolCalls']>[number]>();
   let error: string | undefined;
   const seen: string[] = [];
 
@@ -243,6 +321,8 @@ export async function readRunStream(
       channel?: string;
       message?: { role?: string; content?: string };
       usage?: ChengxiaobangRunResult['usage'];
+      fileChanges?: ChengxiaobangRunResult['fileChanges'];
+      toolCall?: { id?: string; name?: string; status?: string; args?: Record<string, unknown> };
       error?: unknown;
     };
     try {
@@ -267,9 +347,24 @@ export async function readRunStream(
           assistantText = payload.message.content;
         }
         return false;
+      case 'tool_call': {
+        const call = payload.toolCall;
+        if (call?.id) {
+          const entry: ChengxiaobangToolCall = {
+            id: call.id,
+            name: call.name ?? '(unnamed)',
+            status: call.status ?? 'unknown',
+            ...(call.args ? { args: call.args } : {})
+          };
+          toolCalls.set(call.id, entry);
+          onToolCall?.(entry);
+        }
+        return false;
+      }
       case 'run_end':
         status = payload.status;
         usage = payload.usage;
+        fileChanges = payload.fileChanges?.length ? payload.fileChanges : undefined;
         if (payload.status && payload.status !== 'completed' && payload.status !== 'done') {
           error = `run ended with status "${payload.status}"`;
         }
@@ -319,6 +414,8 @@ export async function readRunStream(
       ...(runId ? { runId } : {}),
       ...(status ? { status } : {}),
       ...(usage ? { usage } : {}),
+      ...(fileChanges ? { fileChanges } : {}),
+      ...(toolCalls.size ? { toolCalls: [...toolCalls.values()] } : {}),
       ...(error ? { error } : {}),
       events: seen
     };

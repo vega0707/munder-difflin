@@ -301,6 +301,144 @@ test('steering reports a refusal instead of looking accepted', async () => {
   assert.match(res.error, /steering HTTP 404/);
 });
 
+// ──────────────────────────── tool calls / approvals ─────────────────────────
+
+/** Real shapes: a tool_call is announced, moves to running, and either completes
+ *  or, under accessMode 'approval', sits on `pending_approval`. */
+function frames(...bodies) {
+  return bodies.map((b) => `data: ${JSON.stringify(b)}\n\n`).join('');
+}
+
+test('a tool call that is waiting for permission is visible on the result', async () => {
+  const res = await readRunStream(
+    streamOf(
+      frames(
+        { type: 'run_started', runId: 'run_1' },
+        { type: 'tool_call', runId: 'run_1', toolCall: { id: 'tc_1', name: 'Shell', status: 'pending_approval', args: { command: 'whoami' } } }
+      )
+    )
+  );
+
+  assert.equal(res.ok, false, 'the run never finished');
+  assert.deepEqual(res.toolCalls, [
+    { id: 'tc_1', name: 'Shell', status: 'pending_approval', args: { command: 'whoami' } }
+  ]);
+});
+
+test('the latest status of a tool call wins, not the first', async () => {
+  const res = await readRunStream(
+    streamOf(
+      frames(
+        { type: 'run_started', runId: 'run_1' },
+        { type: 'tool_call', runId: 'run_1', toolCall: { id: 'tc_1', name: 'Shell', status: 'pending_approval' } },
+        { type: 'tool_call', runId: 'run_1', toolCall: { id: 'tc_1', name: 'Shell', status: 'completed' } },
+        { type: 'run_end', status: 'completed' }
+      )
+    )
+  );
+
+  assert.equal(res.ok, true);
+  assert.deepEqual(res.toolCalls, [{ id: 'tc_1', name: 'Shell', status: 'completed' }]);
+});
+
+test('every tool call update is reported, not once per event type', async () => {
+  // onEvent dedupes by type, which is exactly wrong for a status sequence.
+  const updates = [];
+  await readRunStream(
+    streamOf(
+      frames(
+        { type: 'tool_call', runId: 'run_1', toolCall: { id: 'tc_1', name: 'Shell', status: 'running' } },
+        { type: 'tool_call', runId: 'run_1', toolCall: { id: 'tc_1', name: 'Shell', status: 'pending_approval' } }
+      )
+    ),
+    undefined,
+    (call) => updates.push(call.status)
+  );
+
+  assert.deepEqual(updates, ['running', 'pending_approval']);
+});
+
+test('file changes from run_end land on the result', async () => {
+  const res = await readRunStream(
+    streamOf(
+      frames({
+        type: 'run_end',
+        status: 'completed',
+        fileChanges: [
+          {
+            path: '/tmp/x/hello.txt',
+            operation: 'write',
+            patch: '@@ -0,0 +1,1 @@\n+hi\n',
+            additions: 1,
+            deletions: 0,
+            beforeExisted: false,
+            toolCallIds: ['tc_1']
+          }
+        ]
+      })
+    )
+  );
+
+  assert.equal(res.fileChanges.length, 1);
+  assert.equal(res.fileChanges[0].path, '/tmp/x/hello.txt');
+  assert.equal(res.fileChanges[0].additions, 1);
+});
+
+test('approving posts the decision, and scope project when asked', async () => {
+  const fetchImpl = fakeFetch({ status: 200, json: { accepted: true } });
+  const client = new ChengxiaobangClient({ baseUrl: 'http://127.0.0.1:42527', token: 't', fetchImpl });
+
+  assert.equal((await client.approve('tc_1', { approved: true })).ok, true);
+  assert.equal(fetchImpl.seen.url, 'http://127.0.0.1:42527/api/approvals/tc_1');
+  assert.deepEqual(fetchImpl.seen.body, { approved: true });
+
+  await client.approve('tc_1', { approved: true, approvalScope: 'project' });
+  assert.deepEqual(fetchImpl.seen.body, { approved: true, approvalScope: 'project' });
+});
+
+test('a denied approval is sent as a decision, not skipped', async () => {
+  const fetchImpl = fakeFetch({ status: 200, json: { accepted: true } });
+  const client = new ChengxiaobangClient({ baseUrl: 'http://127.0.0.1:42527', token: 't', fetchImpl });
+
+  await client.approve('tc_1', { approved: false });
+
+  assert.deepEqual(fetchImpl.seen.body, { approved: false });
+});
+
+// ──────────────────────────────── revert ─────────────────────────────────────
+
+test('revert posts the direction, and paths only when given', async () => {
+  const fetchImpl = fakeFetch({ status: 200, body: '{}' });
+  const client = new ChengxiaobangClient({ baseUrl: 'http://127.0.0.1:42527', token: 't', fetchImpl });
+
+  assert.equal((await client.revertFileChanges('run_1', { direction: 'undo' })).ok, true);
+  assert.equal(fetchImpl.seen.url, 'http://127.0.0.1:42527/api/runs/run_1/file-changes/revert');
+  assert.deepEqual(fetchImpl.seen.body, { direction: 'undo' }, 'omitted paths means every file');
+
+  await client.revertFileChanges('run_1', { direction: 'redo', paths: ['/tmp/a.txt'] });
+  assert.deepEqual(fetchImpl.seen.body, { direction: 'redo', paths: ['/tmp/a.txt'] });
+});
+
+test('reverting a run that changed nothing explains why, in the app\u2019s words', async () => {
+  const fetchImpl = fakeFetch({ status: 400, body: '{"error":"该运行没有文件变更"}' });
+  const client = new ChengxiaobangClient({ baseUrl: 'http://127.0.0.1:42527', token: 't', fetchImpl });
+
+  const res = await client.revertFileChanges('run_1', { direction: 'undo' });
+
+  assert.equal(res.ok, false);
+  assert.match(res.error, /revert HTTP 400/);
+  assert.match(res.error, /该运行没有文件变更/);
+});
+
+test('the run carries the access mode when one was chosen', async () => {
+  const fetchImpl = fakeFetch({ streamText: 'data: {"type":"run_end","status":"completed"}\n\n' });
+  const client = new ChengxiaobangClient({ baseUrl: 'http://127.0.0.1:42527', token: 't', fetchImpl });
+
+  await client.run('s_1', 'hi', { accessMode: 'approval' });
+
+  assert.deepEqual(fetchImpl.seen.body, { sessionId: 's_1', prompt: 'hi', accessMode: 'approval' });
+});
+
 test('abort posts to the run and survives the app being gone', async () => {
   const fetchImpl = fakeFetch({ status: 200, body: '{}' });
   const client = new ChengxiaobangClient({ baseUrl: 'http://127.0.0.1:42527', token: 't', fetchImpl });

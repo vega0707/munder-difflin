@@ -347,7 +347,7 @@ function fakeCxbClient({ fail = false, text = '程小帮的回答' } = {}) {
       return { id: `s_${calls.created.length}`, providerId: 'ctrip-chat' };
     },
     run: async (sessionId, prompt, opts) => {
-      calls.runs.push({ sessionId, prompt, model: opts?.model });
+      calls.runs.push({ sessionId, prompt, model: opts?.model, accessMode: opts?.accessMode });
       if (fail) return { ok: false, text: '', error: 'app down', events: [] };
       return { ok: true, text, status: 'completed', runId: 'run_1', events: ['run_started', 'delta', 'run_end'] };
     },
@@ -373,26 +373,44 @@ function controllableCxb() {
   const gate = new Promise((r) => { release = r; });
   let started;
   const startedPromise = new Promise((r) => { started = r; });
-  const calls = { runs: [], aborted: [], steered: [], deleted: [] };
+  const calls = { runs: [], aborted: [], steered: [], deleted: [], approved: [], reverted: [] };
   return {
     calls,
     release,
     started: startedPromise,
     createSession: async () => ({ id: 's_1' }),
     run: async (sessionId, prompt, opts) => {
-      calls.runs.push({ sessionId, prompt });
+      calls.runs.push({ sessionId, prompt, accessMode: opts?.accessMode });
       // The real stream announces its run id before any work happens.
       opts?.onEvent?.({ type: 'run_started', runId: 'run_1' });
+      // …and a tool call that stops for permission.
+      opts?.onToolCall?.({ id: 'tc_1', name: 'Shell', status: 'pending_approval' });
       started();
       await gate;
       if (opts?.signal?.aborted) return { ok: false, text: '', error: 'cancelled', events: [] };
+      opts?.onToolCall?.({ id: 'tc_1', name: 'Shell', status: 'completed' });
       opts?.onEvent?.({ type: 'run_end', runId: 'run_1' });
-      return { ok: true, text: 'done', status: 'completed', events: ['run_started', 'run_end'] };
+      return {
+        ok: true,
+        text: 'done',
+        status: 'completed',
+        runId: 'run_1',
+        fileChanges: [{ path: '/tmp/x/hello.txt', operation: 'write', additions: 1, deletions: 0 }],
+        events: ['run_started', 'run_end']
+      };
     },
     abortRun: async (runId) => { calls.aborted.push(runId); return true; },
     steer: async (runId, prompt) => {
       calls.steered.push({ runId, prompt });
       return { ok: true, accepted: true, disposition: 'next_step' };
+    },
+    approve: async (toolCallId, opts) => {
+      calls.approved.push({ toolCallId, ...opts });
+      return { ok: true, accepted: true };
+    },
+    revertFileChanges: async (runId, opts) => {
+      calls.reverted.push({ runId, ...opts });
+      return { ok: true };
     },
     deleteSession: async (id) => { calls.deleted.push(id); return true; }
   };
@@ -547,6 +565,87 @@ test('stopping the host closes the sessions it opened', async () => {
   host.stop();
 
   assert.deepEqual(client.calls.deleted, ['s_1'], 'leaving it behind would litter 程小帮’s own list');
+});
+
+test('a tool call waiting for permission is exposed while the run is blocked', async () => {
+  const hive = fakeHive({ cwd: tempWorkspace(), inbox: MAIL, provider: 'chengxiaobang' });
+  const client = controllableCxb();
+  const { host } = cbHost(hive, client);
+
+  const ticking = host.tick();
+  await client.started;
+
+  assert.deepEqual(host.pendingApprovals('default', 'worker'), [
+    { id: 'tc_1', name: 'Shell', status: 'pending_approval' }
+  ]);
+
+  const res = await host.approveSeat('default', 'worker', 'tc_1', { approved: true, approvalScope: 'project' });
+  assert.equal(res.ok, true);
+  assert.deepEqual(client.calls.approved, [{ toolCallId: 'tc_1', approved: true, approvalScope: 'project' }]);
+
+  client.release();
+  await ticking;
+  assert.deepEqual(host.pendingApprovals('default', 'worker'), [], 'nothing is pending once it is over');
+});
+
+test('a seat on no run has nothing pending to approve', async () => {
+  const hive = fakeHive({ cwd: tempWorkspace(), inbox: [], provider: 'chengxiaobang' });
+  const { host } = cbHost(hive, controllableCxb());
+
+  assert.deepEqual(host.pendingApprovals('default', 'worker'), []);
+});
+
+test('the last run’s file changes are remembered, and revert uses its run id', async () => {
+  const hive = fakeHive({ cwd: tempWorkspace(), inbox: MAIL, provider: 'chengxiaobang' });
+  const client = fakeCxbClient({ text: 'ok' });
+  client.revertFileChanges = async (runId, opts) => {
+    client.reverted = { runId, ...opts };
+    return { ok: true };
+  };
+  // Give this run something to have changed.
+  client.run = async () => ({
+    ok: true,
+    text: 'ok',
+    runId: 'run_9',
+    fileChanges: [{ path: '/tmp/x/a.txt', additions: 2, deletions: 1 }],
+    events: []
+  });
+  const { host } = cbHost(hive, client);
+
+  await host.tick();
+
+  assert.deepEqual(host.lastFileChanges('default', 'worker'), [
+    { path: '/tmp/x/a.txt', additions: 2, deletions: 1 }
+  ]);
+
+  const res = await host.revertSeat('default', 'worker', { direction: 'undo' });
+  assert.equal(res.ok, true);
+  assert.deepEqual(client.reverted, { runId: 'run_9', direction: 'undo' });
+});
+
+test('reverting a seat with no finished changes says so', async () => {
+  const hive = fakeHive({ cwd: tempWorkspace(), inbox: [], provider: 'chengxiaobang' });
+  const { host } = cbHost(hive, controllableCxb());
+
+  assert.deepEqual(host.lastFileChanges('default', 'worker'), []);
+  assert.match((await host.revertSeat('default', 'worker', { direction: 'undo' })).error, /no finished run with file changes/);
+});
+
+test('a typed turn asks for approval mode; a mail run is left on the app default', async () => {
+  // Someone typing is present to answer a gate; a run woken by mail is not, and
+  // blocking it on an answer nobody can give would just stall the floor.
+  const hive = fakeHive({ cwd: tempWorkspace(), inbox: [], provider: 'chengxiaobang' });
+  const client = fakeCxbClient();
+  const { host } = cbHost(hive, client);
+
+  await host.sendTurn('default', 'worker', 'kettle on');
+  assert.equal(client.calls.runs[0].accessMode, 'approval');
+
+  const mailHive = fakeHive({ cwd: tempWorkspace(), inbox: MAIL, provider: 'chengxiaobang' });
+  const mailClient = fakeCxbClient();
+  const { host: mailHost } = cbHost(mailHive, mailClient);
+  await mailHost.tick();
+  assert.equal(mailClient.calls.runs[0].accessMode, undefined);
 });
 
 // ──────────────────────────────── other guards ────────────────────────────────

@@ -67,6 +67,19 @@ All notable changes to this project are documented here. The format is based on
   Typed turns on such a seat also route through 程小帮 now. They used to go through our own runtime,
   which meant one seat behaved differently depending on whether the work arrived as mail or as typing,
   and the stop/steer controls only reached half of it.
+- **A 程小帮 seat can be asked for permission, and its file changes undone.** The other two mid-run
+  controls. A tool call that stops for permission is surfaced while the run is blocked, with the three
+  answers 程小帮 itself offers: allow once, always allow in this project, or deny. A finished run's file
+  changes are kept so they can be shown and rolled back, and rolled forward again.
+  What actually gates a tool call was measured, not assumed: `accessMode` has to be on the RUN, not
+  only on the session, and it has to be `approval` — the app's own default, `smart_approval`, gated
+  nothing we could produce (a file write and a shell command both ran straight through). The gate shows
+  up as `toolCall.status === 'pending_approval'` inside an ordinary `tool_call` event, not as an event
+  type of its own — which is why the first three attempts at finding it failed.
+  So a turn TYPED at a seat asks for `approval` (someone is there to answer), while a run woken by MAIL
+  keeps the app's default: blocking a seat on an answer nobody is present to give would just stall the
+  floor. Both verified against the running app: a Shell call stopped at the gate, was approved, and the
+  run completed; and `undo` on a run that wrote a file really removed it.
 - **Tasks show their id.** The one thing people actually refer to a card by — `bmt-12` — was not
   displayed anywhere: not on the kanban card, which printed only the title and the assignee, and not
   in the detail view behind it. It now leads the card above the title, and leads the detail view's
