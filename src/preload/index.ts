@@ -957,6 +957,36 @@ const api = {
     ipcRenderer.invoke('hive:setAgentHold', id, hold),
   hiveBoard: (): Promise<string> => ipcRenderer.invoke('hive:board'),
   hiveTasks: (): Promise<unknown> => ipcRenderer.invoke('hive:tasks'),
+  /** One chat turn to a built-in (in-process) seat — it has no PTY, so this is
+   *  the only way to talk to it. Resolves with the seat's answer. */
+  agentChat: (payload: {
+    projectId?: string;
+    agentId: string;
+    text: string;
+  }): Promise<{ ok: boolean; text?: string; error?: string }> =>
+    ipcRenderer.invoke('agent:chat', payload),
+  agentChatHistory: (payload: { projectId?: string; agentId: string }): Promise<
+    Array<{ role: 'user' | 'assistant'; content: string; at: number }>
+  > => ipcRenderer.invoke('agent:chat:history', payload),
+  /** Whether this machine has a model channel for built-in seats, and where it
+   *  came from. The source label only — never a key or token. */
+  agentChatReady: (): Promise<{ ready: boolean; source?: string }> =>
+    ipcRenderer.invoke('agent:chat:ready'),
+  /** Progress while a chat turn runs (tool calls and their outcome). */
+  onAgentChatEvent: (
+    cb: (payload: {
+      agentId: string;
+      event: { kind: 'tool' | 'text'; name?: string; ok?: boolean; detail?: string };
+    }) => void
+  ): (() => void) => {
+    const channel = 'agent:chat:event';
+    const listener = (
+      _e: IpcRendererEvent,
+      payload: { agentId: string; event: { kind: 'tool' | 'text'; name?: string; ok?: boolean; detail?: string } }
+    ) => cb(payload);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.removeListener(channel, listener);
+  },
   hiveLog: (n?: number): Promise<unknown[]> => ipcRenderer.invoke('hive:log', n ?? 200),
   hiveRunFlowList: (): Promise<import('../shared/runFlow').RunRecord[]> =>
     ipcRenderer.invoke('hive:runFlowList'),

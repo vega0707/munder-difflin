@@ -5,6 +5,7 @@ import { PixelBadge } from './PixelBadge';
 import { PixelButton } from './PixelButton';
 import { SpritePortrait } from './SpritePortrait';
 import { PtyTerminalView } from './PtyTerminalView';
+import { ChatEnginePanel } from './ChatEnginePanel';
 import { MessageQueueComposer } from './MessageQueueComposer';
 import { TasksKanban } from './TasksKanban';
 import { AskMeTab } from './AskMeTab';
@@ -18,6 +19,7 @@ import { Icon } from './Icon';
 import { MemoryGraphPanel } from './MemoryGraphPanel';
 import { useFleetTelemetry } from '@/hooks/useTelemetry';
 import { COMMAND_GROUPS } from '@shared/claudeCommands';
+import { providerNeedsPty } from '@shared/agentProvider';
 import { roleForHiveSpawn } from '@shared/agentRole';
 import { useStore, triggerHistoryVisible, type Agent } from '@/store/store';
 import { usePtyParser } from '@/hooks/usePtyParser';
@@ -321,7 +323,13 @@ export function CommandCenterPanel({ agent, fullscreen = false }: { agent: Agent
               <MessageQueueComposer agent={agent} />
             </>
           ) : (
-            <Centered>{t('commandCenter.noTerminal', { name: agent.name })}</Centered>
+            providerNeedsPty(agent.provider) ? (
+              <Centered>{t('commandCenter.noTerminal', { name: agent.name })}</Centered>
+            ) : (
+              // A built-in seat has no PTY by design. "No live terminal" describes a
+              // missing thing; this gives it the surface it actually has.
+              <ChatEnginePanel agent={agent} />
+            )
           )
         )}
         {tab === 'floor' && <FloorTab seed={dispatchSeed} />}

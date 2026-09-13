@@ -1,4 +1,15 @@
 {
+  "agentChat": {
+    "empty": "{{name}} has not been asked anything yet.",
+    "placeholder": "Ask {{name}} to do something…",
+    "send": "send",
+    "sending": "working…",
+    "thinking": "thinking…",
+    "working": "working…",
+    "failed": "the run failed",
+    "noChannel": "This seat runs inside the app, so it has no terminal — the conversation happens here instead. It has no model channel yet: set MUNDER_AGENT_LLM_KEY, or sign in to Claude Code or Codex on this machine and it will reuse that setup.",
+    "via": "via {{source}}"
+  },
   "common": {
     "on": "on",
     "off": "off",

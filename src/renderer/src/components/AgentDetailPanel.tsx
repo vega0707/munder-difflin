@@ -7,6 +7,7 @@ import { SpritePortrait } from './SpritePortrait';
 import { PtyTerminalView } from './PtyTerminalView';
 import { terminalInstanceKey } from './terminalRecovery';
 import { MessageQueueComposer } from './MessageQueueComposer';
+import { ChatEnginePanel } from './ChatEnginePanel';
 import { CommandCenterPanel } from './CommandCenterPanel';
 import { disposeTerminal } from './terminalPool';
 import { SidebarTabs } from './SidebarTabs';
@@ -271,12 +272,12 @@ export function AgentDetailPanel({ agent }: AgentDetailPanelProps) {
               <MessageQueueComposer agent={agent} />
             </div>
             )
+          ) : agent.provider === 'builtin' ? (
+            // The seat has no terminal by design — give it the surface it does
+            // have, instead of an explanation of why the terminal is missing.
+            <ChatEnginePanel agent={agent} />
           ) : (
-            <EmptyTab title={t('agentDetail.noPty')}>
-              {agent.provider === 'builtin'
-                ? t('agentDetail.builtinSeat')
-                : t('agentDetail.noPtyDesc')}
-            </EmptyTab>
+            <EmptyTab title={t('agentDetail.noPty')}>{t('agentDetail.noPtyDesc')}</EmptyTab>
           )
         )}
 

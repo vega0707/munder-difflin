@@ -174,6 +174,20 @@ export interface KnowledgeGraphConfig {
   rootPath?: string;
 }
 
+/** Explicit model channel for the built-in (in-process) agent seats. When set it
+ *  outranks credentials that were merely discovered in other tools' config files
+ *  — see src/main/agentLlmCreds.ts for the full order. */
+export interface AgentLlmSection {
+  wire?: 'anthropic' | 'openai' | 'openai-responses';
+  baseUrl?: string;
+  /** Stored in config.json in plain text, same as `groqApiKey` / `slackBotToken`.
+   *  Read only in the main process, never logged, never sent to the renderer. */
+  apiKey?: string;
+  /** Bearer-token alternative to `apiKey` (the corp gateway's ANTHROPIC_AUTH_TOKEN). */
+  authToken?: string;
+  model?: string;
+}
+
 export interface HarnessConfig {
   /** Has the user completed the first-run onboarding? */
   onboardingComplete: boolean;
@@ -365,6 +379,14 @@ export interface HarnessConfig {
   /** Groq Whisper / SenseVoice model id. Default follows the selected provider. */
   freeflowModel?: string;
 
+  // ─── Built-in agent model access (src/main/agentLlmCreds.ts) ───────────────
+  /** Model channel for `builtin` seats. Left undefined, the channel is resolved
+   *  from whatever this machine already has configured: the codex provider, then
+   *  ~/.claude/settings.json env (the same gateway 程小帮 is pointed at). */
+  agentLlm?: AgentLlmSection;
+  /** Turn budget for one built-in agent run before it is called unfinished. */
+  agentMaxSteps?: number;
+
   // ─── Realtime Michael (premium speech-to-speech voice orchestrator) ─────────
   /** True ONLY while a Realtime Michael voice session is live: the renderer
    *  session flips this on at start() (before getUserMedia) and off at stop().
@@ -489,6 +511,8 @@ const DEFAULTS: HarnessConfig = {
   groqApiKey: undefined,
   freeflowProvider: 'groq',
   freeflowModel: 'whisper-large-v3-turbo',
+  agentLlm: undefined,
+  agentMaxSteps: 24,
   realtimeVoiceEnabled: false,
   realtimeIdleDisconnectMs: 180_000,
   webhookEnabled: false,

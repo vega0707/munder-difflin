@@ -1,4 +1,15 @@
 {
+  "agentChat": {
+    "empty": "还没人问过 {{name}}。",
+    "placeholder": "让 {{name}} 做点什么…",
+    "send": "发送",
+    "sending": "执行中…",
+    "thinking": "思考中…",
+    "working": "干活中…",
+    "failed": "这次运行失败了",
+    "noChannel": "这个席位跑在应用里，没有终端，所以对话在这里进行。它还没有模型通道：设一个 MUNDER_AGENT_LLM_KEY，或者本机登录过 Claude Code / Codex，它会直接复用那套配置。",
+    "via": "通道：{{source}}"
+  },
   "common": {
     "on": "开",
     "off": "关",

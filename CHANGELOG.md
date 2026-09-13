@@ -12,6 +12,20 @@ All notable changes to this project are documented here. The format is based on
   persisted); choose the 程小帮 provider in Settings → Voice or let it autoselect on boot when the
   token is present. Hold **Option** or the mic button to dictate. Requires corp-network access to
   `xiaobang.ctripcorp.com`.
+- **A built-in seat is a real agent now.** It used to answer hive mail from a fixed template because
+  it had no model behind it. It now runs a proper turn loop — the model picks between a final answer
+  and one tool call, the call runs, the result goes back — with the tools a CLI seat already has:
+  read and write files, run a command, send and read hive mail. No key to paste: the channel is
+  reused from what this machine already has configured, the codex provider first and then the gateway
+  in `~/.claude/settings.json` (the one 程小帮 itself points at). Set `agentLlm` in Settings, or
+  `MUNDER_AGENT_LLM_KEY`/`_BASE`/`_MODEL`, to force a channel instead. Every secret is read at runtime
+  and never logged or sent to the renderer. A machine with no channel keeps the template reply, so a
+  floor still opens before anything is configured.
+- **A floor carries its own capability manual.** `<hive>/CAPABILITIES.md` is read into every built-in
+  seat's prompt, so what a floor can reach for (data sources, entry points, what it does not do) lives
+  in a file per floor instead of in code. The rules around it are shared and carry no business
+  content, and a floor with no manual is told so explicitly rather than left to imply it has sources
+  it does not.
 - **Tasks show their id.** The one thing people actually refer to a card by — `bmt-12` — was not
   displayed anywhere: not on the kanban card, which printed only the title and the assignee, and not
   in the detail view behind it. It now leads the card above the title, and leads the detail view's

@@ -17,6 +17,9 @@ import {
   readConfig, writeConfig, setAgentTokenCap, resetConfig, onConfigWritten, ensureHarnessHome, ensureClaudePermissionsAccepted,
   modelForRole, OPS_STANDUP_MISSION, HEARTBEAT_MISSION, COMPACT_MAINTENANCE_MISSION, type HarnessConfig, type ScheduledMission
 } from './config';
+import { resolveAgentLlmConfig } from './agentLlmCreds';
+import type { AgentRunEvent } from './agentRuntime';
+import { assembleSeatPrompt, readFloorCapabilities } from './floorCapabilities';
 import { listDir, readFileText, readFileBinary, writeFileText, statAbs, expandTilde } from './fs';
 import { normalizeWeekly, weeklyDelayMs } from '../shared/weeklySchedule';
 import {
@@ -638,7 +641,33 @@ async function publishFloor(projectId: string): Promise<void> {
 }
 const builtinHost = new BuiltinAgentHost({
   listHives: () => projectRegistry.listHives(),
-  occupancy: (projectId, agentId) => seatBoard.occupancy(projectId, agentId)
+  occupancy: (projectId, agentId) => seatBoard.occupancy(projectId, agentId),
+  // A builtin seat runs no CLI, so its model channel is whatever this machine
+  // already has configured (the codex provider, then the gateway in
+  // ~/.claude/settings.json). With no channel the seat falls back to its template
+  // reply, which is what keeps a floor usable before anything is configured.
+  llmConfig: () => resolveAgentLlmConfig(homedir(), process.env, readConfig().agentLlm) ?? null,
+  // The seat's own cwd IS its workspace: for a hive worker that is its worktree,
+  // so the fs tools inherit the same fence the app's file browser already uses.
+  seatWorkspace: (_hive, _agentId, meta) => {
+    const cwd = typeof meta.cwd === 'string' ? meta.cwd.trim() : '';
+    return cwd && isAbsolute(cwd) ? cwd : null;
+  },
+  // The manual is per floor and swappable; the rules around it are not. A floor
+  // with no manual is told so, rather than left to imply it has sources it does not.
+  systemPrompt: (hive, agentId, agentName) => {
+    let meta: { role?: string; isGod?: boolean } = {};
+    try { meta = hive.registry().agents[agentId] ?? {}; } catch { /* registry not ready yet */ }
+    const hiveRoot = hive.root();
+    return assembleSeatPrompt({
+      agentName,
+      role: meta.role,
+      isGod: meta.isGod,
+      hiveRoot,
+      manual: readFloorCapabilities(hiveRoot)
+    });
+  },
+  maxSteps: 24
 });
 /** The PRIMARY window — the one running the hive/god orchestration and the sink
  *  for process-global timer events (missions, breaker, Slack ingestion). It is
@@ -4230,6 +4259,31 @@ ipcMain.handle('hive:setAgentHold', (_evt, id: unknown, hold: unknown, projectId
 });
 ipcMain.handle('hive:board', (_evt, projectId?: unknown) => hiveIPC(projectId).board());
 ipcMain.handle('hive:tasks', (_evt, projectId?: unknown) => hiveIPC(projectId).tasks());
+// A built-in seat runs no CLI and has no PTY, so its chat panel is the only way
+// to talk to it. The turn goes through the same runtime the mail path uses.
+ipcMain.handle('agent:chat', async (evt, payload: unknown) => {
+  const p = (payload ?? {}) as { projectId?: unknown; agentId?: unknown; text?: unknown };
+  if (typeof p.agentId !== 'string' || !p.agentId) return { ok: false, error: 'Invalid chat request' };
+  if (typeof p.text !== 'string' || !p.text.trim()) return { ok: false, error: 'Empty message' };
+  const agentId = p.agentId;
+  const text = p.text;
+  const target = hiveIPC(p.projectId);
+  return builtinHost.sendTurn(target.projectId, agentId, text, (event: AgentRunEvent) => {
+    // The window can go away mid-run (floor closed, or the user navigated).
+    if (!evt.sender.isDestroyed()) evt.sender.send('agent:chat:event', { agentId, event });
+  });
+});
+ipcMain.handle('agent:chat:ready', () => {
+  // The same chain a seat resolves for itself. Only the SOURCE label crosses
+  // IPC ("reusing ~/.codex/config.toml (ctrip)") — never a key or token.
+  const cfg = resolveAgentLlmConfig(homedir(), process.env, readConfig().agentLlm);
+  return { ready: Boolean(cfg), ...(cfg ? { source: cfg.source } : {}) };
+});
+ipcMain.handle('agent:chat:history', (_evt, payload: unknown) => {
+  const p = (payload ?? {}) as { projectId?: unknown; agentId?: unknown };
+  if (typeof p.agentId !== 'string' || !p.agentId) return [];
+  return builtinHost.chatHistory(hiveIPC(p.projectId).projectId, p.agentId);
+});
 ipcMain.handle('hive:log', (_evt, n: unknown, projectId?: unknown) =>
   hiveIPC(projectId).logTail(typeof n === 'number' ? n : 200));
 ipcMain.handle('hive:runFlowList', (_evt, projectId?: unknown) => hiveIPC(projectId).runFlowList());
