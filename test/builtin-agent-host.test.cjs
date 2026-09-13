@@ -366,6 +366,111 @@ function cbHost(hive, client, extra = {}) {
   });
 }
 
+/** A client whose run blocks until the test releases it, so mid-run control can
+ *  be exercised instead of guessed at. */
+function controllableCxb() {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  let started;
+  const startedPromise = new Promise((r) => { started = r; });
+  const calls = { runs: [], aborted: [], steered: [], deleted: [] };
+  return {
+    calls,
+    release,
+    started: startedPromise,
+    createSession: async () => ({ id: 's_1' }),
+    run: async (sessionId, prompt, opts) => {
+      calls.runs.push({ sessionId, prompt });
+      // The real stream announces its run id before any work happens.
+      opts?.onEvent?.({ type: 'run_started', runId: 'run_1' });
+      started();
+      await gate;
+      if (opts?.signal?.aborted) return { ok: false, text: '', error: 'cancelled', events: [] };
+      opts?.onEvent?.({ type: 'run_end', runId: 'run_1' });
+      return { ok: true, text: 'done', status: 'completed', events: ['run_started', 'run_end'] };
+    },
+    abortRun: async (runId) => { calls.aborted.push(runId); return true; },
+    steer: async (runId, prompt) => {
+      calls.steered.push({ runId, prompt });
+      return { ok: true, accepted: true, disposition: 'next_step' };
+    },
+    deleteSession: async (id) => { calls.deleted.push(id); return true; }
+  };
+}
+
+test('a seat on a run reports that it is running, and stops when asked', async () => {
+  const hive = fakeHive({ cwd: tempWorkspace(), inbox: MAIL, provider: 'chengxiaobang' });
+  const client = controllableCxb();
+  const { host } = cbHost(hive, client);
+
+  const ticking = host.tick();
+  await client.started;
+
+  assert.equal(host.isSeatRunning('default', 'worker'), true);
+  assert.equal(host.activeRunId('default', 'worker'), 'run_1');
+
+  assert.equal(await host.abortSeat('default', 'worker'), true);
+  assert.deepEqual(client.calls.aborted, ['run_1'], 'the run endpoint is told too');
+
+  client.release();
+  await ticking;
+  assert.equal(host.isSeatRunning('default', 'worker'), false, 'and the seat is idle again');
+});
+
+test('a line typed at a running seat reaches the live run', async () => {
+  const hive = fakeHive({ cwd: tempWorkspace(), inbox: MAIL, provider: 'chengxiaobang' });
+  const client = controllableCxb();
+  const { host } = cbHost(hive, client);
+
+  const ticking = host.tick();
+  await client.started;
+
+  const res = await host.steerSeat('default', 'worker', '换个方向');
+
+  assert.equal(res.ok, true);
+  assert.equal(res.accepted, true);
+  assert.deepEqual(client.calls.steered, [{ runId: 'run_1', prompt: '换个方向' }]);
+
+  client.release();
+  await ticking;
+});
+
+test('stopping or steering a seat that is on no run says so instead of pretending', async () => {
+  const hive = fakeHive({ cwd: tempWorkspace(), inbox: [], provider: 'chengxiaobang' });
+  const client = controllableCxb();
+  const { host } = cbHost(hive, client);
+
+  assert.equal(await host.abortSeat('default', 'worker'), false);
+  assert.deepEqual(client.calls.aborted, []);
+  assert.match((await host.steerSeat('default', 'worker', 'x')).error, /not on a run/);
+});
+
+test('a typed turn on a 程小帮 seat goes to 程小帮, not to our own runtime', async () => {
+  // Otherwise the same seat would behave differently depending on whether the
+  // work arrived as mail or as typing, and stop/steer would only reach half of it.
+  const hive = fakeHive({ cwd: tempWorkspace(), inbox: [], provider: 'chengxiaobang' });
+  const client = fakeCxbClient({ text: '程小帮答的' });
+  const { host } = cbHost(hive, client);
+
+  const res = await host.sendTurn('default', 'worker', '你好');
+
+  assert.equal(res.ok, true);
+  assert.equal(res.text, '程小帮答的');
+  assert.equal(client.calls.runs.length, 1);
+  assert.match(client.calls.runs[0].prompt, /你好/);
+  assert.deepEqual(host.chatHistory('default', 'worker').map((t) => t.content), ['你好', '程小帮答的']);
+});
+
+test('without the local app a typed turn says why, rather than failing silently', async () => {
+  const hive = fakeHive({ cwd: tempWorkspace(), inbox: [], provider: 'chengxiaobang' });
+  const { host } = hostFor(hive, { llmConfig: () => null, chengxiaobang: () => null });
+
+  const res = await host.sendTurn('default', 'worker', '你好');
+
+  assert.equal(res.ok, false);
+  assert.match(res.error, /程小帮 is not reachable/);
+});
+
 test('a 程小帮 seat runs the mail through the app and delivers its answer', async () => {
   const hive = fakeHive({ cwd: tempWorkspace(), inbox: MAIL, provider: 'chengxiaobang' });
   const client = fakeCxbClient({ text: '分析完成了' });

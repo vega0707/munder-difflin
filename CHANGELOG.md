@@ -56,6 +56,17 @@ All notable changes to this project are documented here. The format is based on
   it required a live PTY, so a Built-in or 程小帮 seat had no exit at all — the seat had to be removed
   by editing files. Such seats now get their own ✕, which archives them without pretending to
   terminate a process that does not exist. Archived seats stay restorable, as before.
+- **A 程小帮 seat can be stopped, and a line can be put into a run that is already going.** The run
+  is addressable now instead of fire-and-forget: while one is in flight the panel shows a stop button,
+  and a message typed during a run goes INTO that run rather than queueing a second one. A run started
+  by mail is controllable too, which is why the panel asks rather than assuming its own turn is the
+  only thing running.
+  Both were measured against the running app: aborting ends the stream within milliseconds and the run
+  reports itself cancelled; steering is accepted with disposition `waiting_for_boundary`, so it does
+  NOT interrupt the current step — it joins at the next boundary, and the composer says exactly that.
+  Typed turns on such a seat also route through 程小帮 now. They used to go through our own runtime,
+  which meant one seat behaved differently depending on whether the work arrived as mail or as typing,
+  and the stop/steer controls only reached half of it.
 - **Tasks show their id.** The one thing people actually refer to a card by — `bmt-12` — was not
   displayed anywhere: not on the kanban card, which printed only the title and the assignee, and not
   in the detail view behind it. It now leads the card above the title, and leads the detail view's

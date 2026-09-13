@@ -122,6 +122,36 @@ export class ChengxiaobangClient {
   }
 
   /**
+   * Put a line of guidance into a run that is ALREADY going. Not a queued next
+   * message: 程小帮 decides whether it lands in the current turn or the next one,
+   * and answers with a disposition saying which.
+   */
+  async steer(
+    runId: string,
+    prompt: string
+  ): Promise<{ ok: boolean; accepted?: boolean; disposition?: string; error?: string }> {
+    if (!prompt.trim()) return { ok: false, error: 'empty steering prompt' };
+    try {
+      const res = await this.fetchImpl(`${this.base}/api/runs/${encodeURIComponent(runId)}/steering`, {
+        method: 'POST',
+        headers: { ...this.headers(), 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt })
+      });
+      if (!res.ok) {
+        return { ok: false, error: `steering HTTP ${res.status}: ${(await res.text()).slice(0, 200)}` };
+      }
+      const body = (await res.json()) as { accepted?: boolean; disposition?: string };
+      return {
+        ok: body.accepted !== false,
+        ...(body.accepted !== undefined ? { accepted: body.accepted } : {}),
+        ...(body.disposition ? { disposition: body.disposition } : {})
+      };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
    * Run one prompt in a session and read the answer off the event stream.
    *
    * The stream is the authority: `delta` frames carry the text as it is produced
@@ -134,7 +164,9 @@ export class ChengxiaobangClient {
     prompt: string,
     opts: {
       model?: string;
-      onEvent?: (type: string) => void;
+      /** Fires per frame. Carries the runId so a caller can steer or abort it
+       *  WHILE it is running — the whole point of reading a stream. */
+      onEvent?: (event: { type: string; runId?: string }) => void;
       signal?: AbortSignal;
       timeoutMs?: number;
     } = {}
@@ -183,7 +215,7 @@ export class ChengxiaobangClient {
  */
 export async function readRunStream(
   body: ReadableStream<Uint8Array>,
-  onEvent?: (type: string) => void
+  onEvent?: (event: { type: string; runId?: string }) => void
 ): Promise<ChengxiaobangRunResult> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -221,7 +253,7 @@ export async function readRunStream(
     if (payload.runId && !runId) runId = payload.runId;
     if (payload.type && !seen.includes(payload.type)) {
       seen.push(payload.type);
-      onEvent?.(payload.type);
+      onEvent?.({ type: payload.type, ...(runId ? { runId } : {}) });
     }
     switch (payload.type) {
       case 'delta':

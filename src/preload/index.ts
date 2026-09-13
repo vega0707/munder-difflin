@@ -972,6 +972,22 @@ const api = {
    *  came from. The source label only — never a key or token. */
   agentChatReady: (): Promise<{ ready: boolean; source?: string }> =>
     ipcRenderer.invoke('agent:chat:ready'),
+  /** Is this seat mid-run right now? True for a run started by mail, not just
+   *  one the user typed, which is why the panel asks instead of assuming. */
+  agentChatRunning: (payload: {
+    projectId?: string;
+    agentId: string;
+  }): Promise<{ running: boolean; runId?: string }> => ipcRenderer.invoke('agent:chat:running', payload),
+  /** Stop the run this seat is on. */
+  agentChatAbort: (payload: { projectId?: string; agentId: string }): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('agent:chat:abort', payload),
+  /** Put a line of guidance into the run that is already going. */
+  agentChatSteer: (payload: {
+    projectId?: string;
+    agentId: string;
+    text: string;
+  }): Promise<{ ok: boolean; accepted?: boolean; disposition?: string; error?: string }> =>
+    ipcRenderer.invoke('agent:chat:steer', payload),
   /** Progress while a chat turn runs (tool calls and their outcome). */
   onAgentChatEvent: (
     cb: (payload: {

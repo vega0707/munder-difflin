@@ -4305,6 +4305,29 @@ ipcMain.handle('agent:chat:history', (_evt, payload: unknown) => {
   if (typeof p.agentId !== 'string' || !p.agentId) return [];
   return builtinHost.chatHistory(hiveIPC(p.projectId).projectId, p.agentId);
 });
+// Mid-run control. A seat can be running because of MAIL rather than because the
+// user typed something, so the panel asks rather than assuming.
+ipcMain.handle('agent:chat:running', (_evt, payload: unknown) => {
+  const p = (payload ?? {}) as { projectId?: unknown; agentId?: unknown };
+  if (typeof p.agentId !== 'string' || !p.agentId) return { running: false };
+  const target = hiveIPC(p.projectId);
+  return {
+    running: builtinHost.isSeatRunning(target.projectId, p.agentId),
+    runId: builtinHost.activeRunId(target.projectId, p.agentId)
+  };
+});
+ipcMain.handle('agent:chat:abort', async (_evt, payload: unknown) => {
+  const p = (payload ?? {}) as { projectId?: unknown; agentId?: unknown };
+  if (typeof p.agentId !== 'string' || !p.agentId) return { ok: false, error: 'Invalid request' };
+  const aborted = await builtinHost.abortSeat(hiveIPC(p.projectId).projectId, p.agentId);
+  return aborted ? { ok: true } : { ok: false, error: 'this seat is not on a run' };
+});
+ipcMain.handle('agent:chat:steer', async (_evt, payload: unknown) => {
+  const p = (payload ?? {}) as { projectId?: unknown; agentId?: unknown; text?: unknown };
+  if (typeof p.agentId !== 'string' || !p.agentId) return { ok: false, error: 'Invalid request' };
+  if (typeof p.text !== 'string' || !p.text.trim()) return { ok: false, error: 'Empty message' };
+  return builtinHost.steerSeat(hiveIPC(p.projectId).projectId, p.agentId, p.text);
+});
 ipcMain.handle('hive:log', (_evt, n: unknown, projectId?: unknown) =>
   hiveIPC(projectId).logTail(typeof n === 'number' ? n : 200));
 ipcMain.handle('hive:runFlowList', (_evt, projectId?: unknown) => hiveIPC(projectId).runFlowList());

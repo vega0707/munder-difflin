@@ -8,7 +8,11 @@
     "working": "干活中…",
     "failed": "这次运行失败了",
     "noChannel": "这个席位跑在应用里，没有终端，所以对话在这里进行。它还没有模型通道：设一个 MUNDER_AGENT_LLM_KEY，或者本机登录过 Claude Code / Codex，它会直接复用那套配置。",
-    "via": "通道：{{source}}"
+    "via": "通道：{{source}}",
+    "stop": "停止",
+    "steer": "插话",
+    "steerHint": "正在跑 — 发出去的内容会在当前步骤结束时加入这次运行",
+    "steerTag": "（插话）"
   },
   "common": {
     "on": "开",

@@ -1,10 +1,11 @@
 import { draftBuiltinReply } from '../shared/builtinAgent';
-import { isInProcessChatEngine } from '../shared/agentProvider';
+import { isInProcessChatEngine, type AgentProvider } from '../shared/agentProvider';
 import { AgentRuntime, type AgentRunEvent, type AgentRunResult, type AgentToolTraceEntry, type LlmClient } from './agentRuntime';
 import { createAgentTools } from './agentTools';
 import { createAgentLlm } from './agentLlm';
 import type { AgentLlmConfig } from './agentLlmCreds';
 import type { ChengxiaobangClient } from './chengxiaobangClient';
+import type { ChengxiaobangRunResult } from '../shared/chengxiaobang';
 import type { HiveManager, HiveMessage } from './hive';
 import type { SeatOccupancy } from '../shared/seats';
 
@@ -19,6 +20,14 @@ export interface ChatTurn {
 
 /** Recent tail kept per seat. Older turns fall off; the record is the board. */
 const MAX_KEPT_TURNS = 60;
+
+/** A 程小帮 run that is currently in flight for one seat. */
+interface ChengxiaobangActiveRun {
+  sessionId: string;
+  /** Known only once `run_started` arrives; steering needs it. */
+  runId?: string;
+  abort: () => void;
+}
 
 /**
  * Polls builtin-provider agents and answers hive mail on disk. No PTY.
@@ -104,6 +113,8 @@ export class BuiltinAgentHost {
   private cbSessions = new Map<string, string>();
   /** Seats whose 程小帮 session has already been given the floor manual. */
   private cbPrimed = new Set<string>();
+  /** Seats with a 程小帮 run in flight right now, so the UI can stop or steer it. */
+  private cbActive = new Map<string, ChengxiaobangActiveRun>();
 
   chatHistory(projectId: string, agentId: string): ChatTurn[] {
     return this.turns.get(`${projectId}|${agentId}`) ?? [];
@@ -119,14 +130,12 @@ export class BuiltinAgentHost {
     onEvent?: (event: AgentRunEvent) => void
   ): Promise<{ ok: boolean; text?: string; error?: string; toolTrace?: AgentToolTraceEntry[] }> {
     if (!text.trim()) return { ok: false, error: 'empty message' };
-    const cfg = this.opts.llmConfig?.() ?? null;
-    if (!cfg) {
-      return { ok: false, error: 'this machine has no model channel configured for built-in seats' };
-    }
     const hive = this.opts.listHives().find((h) => h.projectId === projectId);
     if (!hive) return { ok: false, error: `no floor ${projectId}` };
 
-    let meta: { name?: string; cwd?: unknown; isGod?: boolean; role?: string; archived?: boolean } | undefined;
+    let meta:
+      | { name?: string; provider?: AgentProvider; cwd?: unknown; isGod?: boolean; role?: string; archived?: boolean }
+      | undefined;
     try {
       meta = hive.registry().agents[agentId];
     } catch {
@@ -135,10 +144,55 @@ export class BuiltinAgentHost {
     if (!meta) return { ok: false, error: `no seat ${agentId} on this floor` };
 
     const agentName = meta.name ?? agentId;
+    const key = `${projectId}|${agentId}`;
+
+    // A 程小帮 seat answers through 程小帮 whether the work arrived as mail or as a
+    // typed turn. Routing typed turns through our own runtime instead would make
+    // one seat behave differently depending on how it was asked, and the
+    // stop/steer controls would only reach half of it.
+    if (meta.provider === 'chengxiaobang') {
+      const cb = this.opts.chengxiaobang?.() ?? null;
+      if (!cb) return { ok: false, error: '程小帮 is not reachable from this app' };
+      const primed = this.cbPrimed.has(key);
+      let sessionId = this.cbSessions.get(key);
+      try {
+        if (!sessionId) {
+          const session = await cb.createSession({ title: `${agentName} · ${projectId}` });
+          sessionId = session.id;
+          this.cbSessions.set(key, sessionId);
+        }
+        const manual = primed ? '' : (this.opts.systemPrompt?.(hive, agentId, agentName) ?? '');
+        const task = manual ? `${manual}\n\n${text}` : text;
+        const res = await this.runTracked(
+          cb,
+          key,
+          sessionId,
+          task,
+          projectId,
+          agentId,
+          this.opts.chengxiaobangModel?.(agentId)
+        );
+        this.cbPrimed.add(key);
+        this.opts.onRun?.({ projectId, agentId, ok: res.ok, text: res.text, error: res.error });
+        this.remember(key, [
+          { role: 'user', content: text, at: Date.now() },
+          ...(res.ok && res.text ? [{ role: 'assistant' as const, content: res.text, at: Date.now() }] : [])
+        ]);
+        return res.ok ? { ok: true, text: res.text } : { ok: false, error: res.error ?? 'the run did not complete' };
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        this.remember(key, [{ role: 'user', content: text, at: Date.now() }]);
+        this.opts.onRun?.({ projectId, agentId, ok: false, error });
+        return { ok: false, error };
+      }
+    }
+
+    const cfg = this.opts.llmConfig?.() ?? null;
+    if (!cfg) {
+      return { ok: false, error: 'this machine has no model channel configured for built-in seats' };
+    }
     const runtime = this.runtimeFor(hive, agentId, agentName, meta, cfg, { onEvent });
     if (!runtime) return { ok: false, error: 'this seat has no workspace to work in' };
-
-    const key = `${projectId}|${agentId}`;
     const history = this.turns.get(key) ?? [];
     let res: AgentRunResult;
     try {
@@ -280,6 +334,79 @@ export class BuiltinAgentHost {
     return res.ok;
   }
 
+  // ── Mid-run control (the seat's own stop / steer) ───────────────────────────
+
+  /** Is this seat mid-run? Drives the stop and steer controls in its panel. */
+  isSeatRunning(projectId: string, agentId: string): boolean {
+    return this.cbActive.has(`${projectId}|${agentId}`);
+  }
+
+  /** The live run's id, when it has reported one. */
+  activeRunId(projectId: string, agentId: string): string | undefined {
+    return this.cbActive.get(`${projectId}|${agentId}`)?.runId;
+  }
+
+  /** Stop the run this seat is on. False when it is on no run at all. */
+  async abortSeat(projectId: string, agentId: string): Promise<boolean> {
+    const active = this.cbActive.get(`${projectId}|${agentId}`);
+    if (!active) return false;
+    // 程小帮 aborts a run when its consumer disconnects, so dropping the stream
+    // suffices on its own. The endpoint is called too, because it also reaches a
+    // run whose stream we are only half-reading.
+    const client = this.opts.chengxiaobang?.() ?? null;
+    if (client && active.runId) void client.abortRun(active.runId);
+    active.abort();
+    return true;
+  }
+
+  /** Put a line of guidance into the run this seat is on. */
+  async steerSeat(
+    projectId: string,
+    agentId: string,
+    prompt: string
+  ): Promise<{ ok: boolean; accepted?: boolean; disposition?: string; error?: string }> {
+    const active = this.cbActive.get(`${projectId}|${agentId}`);
+    if (!active) return { ok: false, error: 'this seat is not on a run' };
+    if (!active.runId) return { ok: false, error: 'the run has not reported its id yet' };
+    const client = this.opts.chengxiaobang?.() ?? null;
+    if (!client) return { ok: false, error: '程小帮 is not reachable' };
+    return client.steer(active.runId, prompt);
+  }
+
+  /**
+   * Run one 程小帮 task while keeping it addressable.
+   *
+   * The registry entry is what lets the seat's own UI stop the run or put a line
+   * into it. Without it the seat is fire-and-forget: you can hand over work but
+   * not call it back.
+   */
+  private async runTracked(
+    client: ChengxiaobangClient,
+    key: string,
+    sessionId: string,
+    task: string,
+    projectId: string,
+    agentId: string,
+    model?: string
+  ): Promise<ChengxiaobangRunResult> {
+    const controller = new AbortController();
+    const active: ChengxiaobangActiveRun = { sessionId, abort: () => controller.abort() };
+    this.cbActive.set(key, active);
+    try {
+      return await client.run(sessionId, task, {
+        ...(model ? { model } : {}),
+        signal: controller.signal,
+        onEvent: (event) => {
+          if (event.runId && !active.runId) active.runId = event.runId;
+          this.opts.onEvent?.(projectId, agentId, { kind: 'tool', name: event.type, ok: true });
+        }
+      });
+    } finally {
+      // Only clear our own entry: a later tick may already have replaced it.
+      if (this.cbActive.get(key) === active) this.cbActive.delete(key);
+    }
+  }
+
   /**
    * Hand a seat's mail to 程小帮 and deliver its answer.
    *
@@ -308,11 +435,15 @@ export class BuiltinAgentHost {
       this.cbSessions.set(key, sessionId);
     }
 
-    const res = await client.run(sessionId, this.chengxiaobangTaskFor(agentName, mail, hive, agentId, primed), {
-      model: this.opts.chengxiaobangModel?.(agentId),
-      onEvent: (type) =>
-        this.opts.onEvent?.(hive.projectId, agentId, { kind: 'tool', name: type, ok: true })
-    });
+    const res = await this.runTracked(
+      client,
+      key,
+      sessionId,
+      this.chengxiaobangTaskFor(agentName, mail, hive, agentId, primed),
+      hive.projectId,
+      agentId,
+      this.opts.chengxiaobangModel?.(agentId)
+    );
     this.cbPrimed.add(key);
     this.opts.onRun?.({
       projectId: hive.projectId,

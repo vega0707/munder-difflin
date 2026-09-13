@@ -32,10 +32,27 @@ export function ChatEnginePanel({ agent }: ChatEnginePanelProps) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  /** The seat is on a run — possibly one mail started, not just one typed here. */
+  const [running, setRunning] = useState(false);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [channel, setChannel] = useState<{ ready: boolean; source?: string } | null>(null);
   const scroller = useRef<HTMLDivElement | null>(null);
+
+  // A run can start without this panel: mail wakes the seat. Polling is how the
+  // stop and steer controls learn about it. Cheap, and local to this process.
+  useEffect(() => {
+    let alive = true;
+    const ask = () => {
+      void window.cth
+        .agentChatRunning({ projectId, agentId: agent.id })
+        .then((info) => { if (alive) setRunning(info.running); })
+        .catch(() => { /* app closing */ });
+    };
+    ask();
+    const timer = setInterval(ask, 2500);
+    return () => { alive = false; clearInterval(timer); };
+  }, [projectId, agent.id]);
 
   // Which model channel this machine has, if any. Asked up front so a
   // conversation that cannot work says so before anything is typed into it.
@@ -69,13 +86,25 @@ export function ChatEnginePanel({ agent }: ChatEnginePanelProps) {
   useEffect(() => {
     const el = scroller.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [turns, activity, busy]);
+  }, [turns, activity, busy, running]);
 
   const send = useCallback(async () => {
     const text = draft.trim();
     if (!text || busy) return;
-    setDraft('');
     setError(null);
+
+    // While the seat is already on a run, typing does not start a second one:
+    // it goes INTO the run as guidance. That is the only honest reading of a
+    // message sent to something already working.
+    if (running) {
+      setDraft('');
+      setTurns((prev) => [...prev, { role: 'user', content: `${t('agentChat.steerTag')} ${text}`, at: Date.now() }]);
+      const steered = await window.cth.agentChatSteer({ projectId, agentId: agent.id, text });
+      if (!steered.ok) setError(steered.error ?? t('agentChat.failed'));
+      return;
+    }
+
+    setDraft('');
     setActivity([]);
     setTurns((prev) => [...prev, { role: 'user', content: text, at: Date.now() }]);
     setBusy(true);
@@ -93,7 +122,15 @@ export function ChatEnginePanel({ agent }: ChatEnginePanelProps) {
     } finally {
       setBusy(false);
     }
-  }, [agent.id, busy, draft, projectId, t]);
+  }, [agent.id, busy, draft, projectId, running, t]);
+
+  const stop = useCallback(async () => {
+    setError(null);
+    const res = await window.cth.agentChatAbort({ projectId, agentId: agent.id });
+    if (!res.ok) setError(res.error ?? t('agentChat.failed'));
+    // The poll will clear `running`; drop it now so the button does not feel dead.
+    setRunning(false);
+  }, [agent.id, projectId, t]);
 
   const unavailable = channel !== null && !channel.ready;
 
@@ -131,7 +168,7 @@ export function ChatEnginePanel({ agent }: ChatEnginePanelProps) {
           </div>
         ))}
 
-        {busy && (
+        {(busy || running) && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignSelf: 'flex-start' }}>
             <span style={{ fontSize: 12, color: 'var(--cth-ink-500)' }}>
               {activity.length ? t('agentChat.working') : t('agentChat.thinking')}
@@ -169,7 +206,7 @@ export function ChatEnginePanel({ agent }: ChatEnginePanelProps) {
               }}
               rows={2}
               disabled={busy}
-              placeholder={t('agentChat.placeholder', { name: agent.name })}
+              placeholder={running ? t('agentChat.steerHint') : t('agentChat.placeholder', { name: agent.name })}
               style={{
                 width: '100%',
                 resize: 'none',
@@ -185,9 +222,16 @@ export function ChatEnginePanel({ agent }: ChatEnginePanelProps) {
               <span style={{ fontSize: 10, color: 'var(--cth-ink-500)' }}>
                 {channel?.ready && channel.source ? t('agentChat.via', { source: channel.source }) : ''}
               </span>
-              <PixelButton onClick={() => void send()} disabled={busy || !draft.trim()}>
-                {busy ? t('agentChat.sending') : t('agentChat.send')}
-              </PixelButton>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {running && (
+                  <PixelButton onClick={() => void stop()}>
+                    {t('agentChat.stop')}
+                  </PixelButton>
+                )}
+                <PixelButton onClick={() => void send()} disabled={busy || !draft.trim()}>
+                  {busy ? t('agentChat.sending') : running ? t('agentChat.steer') : t('agentChat.send')}
+                </PixelButton>
+              </div>
             </div>
           </>
         )}

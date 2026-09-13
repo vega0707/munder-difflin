@@ -180,11 +180,17 @@ test('unreadable frames are skipped instead of killing the run', async () => {
   assert.equal(res.text, 'fine');
 });
 
-test('event types are reported to the caller as they arrive', async () => {
+test('event types are reported to the caller as they arrive, with the run id', async () => {
   const seen = [];
-  await readRunStream(streamOf(REAL_FRAMES), (type) => seen.push(type));
+  await readRunStream(streamOf(REAL_FRAMES), (event) => seen.push(event));
 
-  assert.deepEqual(seen, ['run_started', 'message', 'model_debug', 'delta', 'run_end']);
+  assert.deepEqual(seen.map((e) => e.type), ['run_started', 'message', 'model_debug', 'delta', 'run_end']);
+  // The runId is what makes a run steerable while it is going, so every frame
+  // after run_started has to carry it too.
+  assert.deepEqual(
+    seen.map((e) => e.runId),
+    Array(5).fill('run_e6890089-b35f-4696-a84f-5f8b07badfe2')
+  );
 });
 
 // ────────────────────────────── client behaviour ──────────────────────────────
@@ -261,6 +267,38 @@ test('run reports an HTTP failure rather than pretending the run happened', asyn
 
   assert.equal(res.ok, false);
   assert.match(res.error, /run HTTP 404/);
+});
+
+test('steering posts the line to the live run and reports how it landed', async () => {
+  const fetchImpl = fakeFetch({ status: 200, json: { accepted: true, disposition: 'next_step' } });
+  const client = new ChengxiaobangClient({ baseUrl: 'http://127.0.0.1:42527', token: 't', fetchImpl });
+
+  const res = await client.steer('run_1', '先别动那个文件');
+
+  assert.equal(res.ok, true);
+  assert.equal(res.accepted, true);
+  assert.equal(res.disposition, 'next_step');
+  assert.equal(fetchImpl.seen.url, 'http://127.0.0.1:42527/api/runs/run_1/steering');
+  assert.equal(fetchImpl.seen.method, 'POST');
+  assert.deepEqual(fetchImpl.seen.body, { prompt: '先别动那个文件' });
+});
+
+test('steering an empty line never leaves the machine', async () => {
+  const fetchImpl = fakeFetch({ status: 200, json: { accepted: true } });
+  const client = new ChengxiaobangClient({ baseUrl: 'http://127.0.0.1:42527', token: 't', fetchImpl });
+
+  assert.equal((await client.steer('run_1', '   ')).ok, false);
+  assert.equal(fetchImpl.seen.url, undefined, 'no request was made');
+});
+
+test('steering reports a refusal instead of looking accepted', async () => {
+  const fetchImpl = fakeFetch({ status: 404, body: '{"error":"运行不存在"}' });
+  const client = new ChengxiaobangClient({ baseUrl: 'http://127.0.0.1:42527', token: 't', fetchImpl });
+
+  const res = await client.steer('gone', 'hello');
+
+  assert.equal(res.ok, false);
+  assert.match(res.error, /steering HTTP 404/);
 });
 
 test('abort posts to the run and survives the app being gone', async () => {
